@@ -395,6 +395,7 @@
                 else if (action === 'monitor-save-webserver') saveMonitorWebserver();
                 else if (action === 'update-ver') updateVer(false);
                 else if (action === 'update-ver-beta') updateVer(true);
+                else if (action === 'update-clamav') updateClamAv();
                 else if (action === 'update-sigs') updateSigs();
                 else if (action === 'save-config') saveConfig();
                 else if (action === 'change-password') changePassword();
