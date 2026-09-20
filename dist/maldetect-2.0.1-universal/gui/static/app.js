@@ -158,6 +158,9 @@
             'Start': 'Iniciar', 'Reload': 'Recarregar', 'Update': 'Atualizar', 'Beta': 'Beta',
             'Update Sigs': 'Atualizar assinaturas', 'Update ClamAV': 'Atualizar ClamAV',
             'Save Changes': 'Salvar alterações',
+            'Save ignore list': 'Salvar lista de exclusão',
+            'Ignore list saved': 'Lista de exclusão salva',
+            'Ignore list save failed: ': 'Falha ao salvar a lista de exclusão: ',
             'Test Alerts': 'Testar alertas', 'Type': 'Tipo', 'Channel': 'Canal',
             'Send Test Alert': 'Enviar alerta de teste', 'Event Log': 'Log de eventos',
             'entries': 'entradas', 'Maintenance': 'Manutenção', 'Run Maintenance': 'Executar manutenção',
@@ -406,6 +409,7 @@
                 else if (action === 'security-change-password') securityChangePassword();
                 else if (action === 'send-alert') sendAlert();
                 else if (action === 'ignore-tab') showIgnoreTab(el.getAttribute('data-name'));
+                else if (action === 'save-ignore') saveIgnore(el.getAttribute('data-name'), el);
                 else if (action === 'scanner-tab') switchScannerTab(el.getAttribute('data-tab'));
                 else if (action === 'run-maint') runMaint();
                 else if (action === 'run-purge') runPurge();
@@ -1637,7 +1641,9 @@
                 var info = files[name];
                 h += '<div id="ignore-' + name + '" style="display:' + (name === Object.keys(files)[0] ? 'block' : 'none') + ';">';
                 h += '<p style="font-size:12px;color:var(--text-muted);">' + escapeHtml(info.description) + '</p>';
-                h += '<textarea class="form-textarea" rows="10" style="width:100%;">' + info.lines.map(function(l) { return escapeHtml(l); }).join('\n') + '</textarea></div>';
+                h += '<textarea class="form-textarea" rows="10" style="width:100%;">' + info.lines.map(function(l) { return escapeHtml(l); }).join('\n') + '</textarea>';
+                h += '<button class="btn btn-primary" data-action="save-ignore" data-name="' + escapeHtml(name) + '">' +
+                    tr('Save ignore list') + '</button></div>';
             }
             h += '</div>';
             return h;
@@ -1648,6 +1654,20 @@
         var tabs = document.querySelectorAll('[id^="ignore-"]');
         for (var i = 0; i < tabs.length; i++) tabs[i].style.display = 'none';
         document.getElementById('ignore-' + name).style.display = 'block';
+    }
+
+    function saveIgnore(name, button) {
+        var section = document.getElementById('ignore-' + name);
+        var textarea = section ? section.querySelector('textarea') : null;
+        if (!textarea) return;
+        button.disabled = true;
+        API.put('/ignore', { filename: name, lines: textarea.value.split(/\r?\n/) }).then(function() {
+            toast(tr('Ignore list saved'), 'success');
+        }).catch(function(err) {
+            toast(tr('Ignore list save failed: ') + err.message, 'error');
+        }).finally(function() {
+            button.disabled = false;
+        });
     }
 
     // ----- Maintenance -----
