@@ -296,6 +296,7 @@
             'Scan details': 'Detalhes do scan', 'Infection details': 'Detalhes da infecção',
             'Scan report': 'Relatório do scan', 'Error loading details: ': 'Erro ao carregar detalhes: ',
             'Error loading report: ': 'Erro ao carregar relatório: ',
+            'Show Report': 'Exibir relatório',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
             'Deleting...': 'Excluindo...', 'Restoring all...': 'Restaurando tudo...',
             'Quarantining...': 'Colocando em quarentena...', 'Send Test Alert': 'Enviar alerta de teste',
@@ -1122,7 +1123,7 @@
                     h += '<td style="font-size:12px;">' + escapeHtml(r.path || '-') + '</td><td>' + fmtTime(r.started_epoch) + '</td>';
                     h += '<td>' + escapeHtml(r.completed || (r.completed_epoch ? fmtTime(r.completed_epoch) : '-')) + '</td>';
                     h += '<td>' + fmtDuration(r.elapsed_seconds) + '</td><td>' + (Number(r.total_files) || 0) + '</td><td>' + hits + '</td><td>' + quarantined + '</td>';
-                    h += '<td><button class="btn btn-primary btn-sm" data-action="report-details" data-id="' + escapeHtml(scanId) + '">Exibir relatório</button> ';
+                    h += '<td><button class="btn btn-primary btn-sm" data-action="report-details" data-id="' + escapeHtml(scanId) + '">' + tr('Show Report') + '</button> ';
                     h += '<button class="btn btn-ghost btn-sm" data-action="scan-quarantine" data-id="' + escapeHtml(scanId) + '"' +
                         (hits === 0 ? ' disabled title="No detections in this scan"' : '') + '>Quarantine</button> ';
                     h += '<button class="btn btn-ghost btn-sm" data-action="scan-restore" data-id="' + escapeHtml(scanId) + '"' +
