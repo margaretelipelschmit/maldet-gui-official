@@ -13,17 +13,30 @@
         _fetch: function(path, options) {
             var self = this;
             options = options || {};
+            var method = options.method || 'GET';
+            var timeout = options.timeout || self.timeout;
+            var retries = options.retries === undefined ? (method === 'GET' ? 2 : 0) : options.retries;
             return new Promise(function(resolve, reject) {
                 var xhr = new XMLHttpRequest();
+                var retryScheduled = false;
                 var timer = setTimeout(function() {
+                    retryScheduled = true;
                     xhr.abort();
-                    reject(new Error('Request timed out'));
-                }, self.timeout);
-                xhr.open(options.method || 'GET', self.base + path, true);
+                    if (method === 'GET' && retries > 0) {
+                        setTimeout(function() {
+                            self._fetch(path, { method: method, timeout: timeout, retries: retries - 1 })
+                                .then(resolve).catch(reject);
+                        }, 250);
+                    } else {
+                        reject(new Error('Request timed out'));
+                    }
+                }, timeout);
+                xhr.open(method, self.base + path, true);
                 xhr.setRequestHeader('Accept', 'application/json');
                 if (options.body) xhr.setRequestHeader('Content-Type', 'application/json');
                 xhr.onreadystatechange = function() {
                     if (xhr.readyState !== 4) return;
+                    if (retryScheduled) return;
                     clearTimeout(timer);
                     var data = {};
                     try { data = xhr.responseText ? JSON.parse(xhr.responseText) : {}; }
@@ -32,6 +45,13 @@
                         showAuthScreen(data.setup_required);
                         reject(new Error(data.error || 'Authentication required'));
                     } else if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+                    else if (xhr.status === 0 && method === 'GET' && retries > 0) {
+                        retryScheduled = true;
+                        setTimeout(function() {
+                            self._fetch(path, { method: method, timeout: timeout, retries: retries - 1 })
+                                .then(resolve).catch(reject);
+                        }, 250);
+                    }
                     else {
                         var error = new Error(data.error || ('Request failed (' + xhr.status + ')'));
                         error.data = data;
@@ -41,12 +61,25 @@
 
                 xhr.onerror = function() {
                     clearTimeout(timer);
-                    reject(new Error('Network error'));
+                    if (retryScheduled) return;
+                    if (method === 'GET' && retries > 0) {
+                        retryScheduled = true;
+                        setTimeout(function() {
+                            self._fetch(path, { method: method, timeout: timeout, retries: retries - 1 })
+                                .then(resolve).catch(reject);
+                        }, 250);
+                    } else {
+                        reject(new Error('Network error'));
+                    }
                 };
                 xhr.send(options.body || null);
             });
         },
-        get: function(path) { return this._fetch(path, { method: 'GET' }); },
+        get: function(path, options) {
+            options = options || {};
+            options.method = 'GET';
+            return this._fetch(path, options);
+        },
         post: function(path, body) {
             return this._fetch(path, { method: 'POST', body: JSON.stringify(body || {}) });
         },
@@ -156,7 +189,11 @@
             'Quarantined Files': 'Arquivos em quarentena', 'Scan Reports': 'Relatórios de scans',
             'Quarantine': 'Quarentenar', 'Restore': 'Restaurar', 'Inotify Monitoring': 'Monitoramento inotify',
             'Start': 'Iniciar', 'Reload': 'Recarregar', 'Update': 'Atualizar', 'Beta': 'Beta',
-            'Update Sigs': 'Atualizar assinaturas', 'Save Changes': 'Salvar alterações',
+            'Update Sigs': 'Atualizar assinaturas', 'Update ClamAV': 'Atualizar ClamAV',
+            'Save Changes': 'Salvar alterações',
+            'Save ignore list': 'Salvar lista de exclusão',
+            'Ignore list saved': 'Lista de exclusão salva',
+            'Ignore list save failed: ': 'Falha ao salvar a lista de exclusão: ',
             'Test Alerts': 'Testar alertas', 'Type': 'Tipo', 'Channel': 'Canal',
             'Send Test Alert': 'Enviar alerta de teste', 'Event Log': 'Log de eventos',
             'entries': 'entradas', 'Maintenance': 'Manutenção', 'Run Maintenance': 'Executar manutenção',
@@ -164,6 +201,9 @@
             'Signature Set': 'Conjunto de assinaturas', 'Monitor': 'Monitor',
             'ONLINE': 'ATIVO', 'OFFLINE': 'INATIVO', 'Maldet native (live file progress)': 'Maldet nativo (progresso em tempo real)',
             'ClamAV/clamdscan (faster, limited progress)': 'ClamAV/clamdscan (mais rápido, progresso limitado)',
+            'ClamAV updated': 'ClamAV atualizado',
+            'ClamAV already current': 'ClamAV já está atualizado',
+            'ClamAV update failed: ': 'Falha ao atualizar o ClamAV: ',
             'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Scan concluído — ameaças encontradas!',
             'Scan complete - no malware': 'Scan concluído — nenhum malware encontrado',
             'Scan started in background': 'Scan iniciado em segundo plano', 'Monitor started': 'Monitor iniciado',
@@ -402,6 +442,7 @@
                 else if (action === 'security-change-password') securityChangePassword();
                 else if (action === 'send-alert') sendAlert();
                 else if (action === 'ignore-tab') showIgnoreTab(el.getAttribute('data-name'));
+                else if (action === 'save-ignore') saveIgnore(el.getAttribute('data-name'), el);
                 else if (action === 'scanner-tab') switchScannerTab(el.getAttribute('data-tab'));
                 else if (action === 'run-maint') runMaint();
                 else if (action === 'run-purge') runPurge();
@@ -1346,7 +1387,7 @@
             h += '<tr><td>LMD Version</td><td>' + escapeHtml(sys.version || 'unknown') + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-ver">Update</button> <button class="btn btn-warning btn-sm" data-action="update-ver-beta">Beta</button></td></tr>';
             h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || 'unknown') + ' (' + escapeHtml(sys.clamav_status || 'missing') + ')</td>';
-            h += '<td><button class="btn btn-primary btn-sm" data-action="update-clamav">Update ClamAV</button></td></tr>';
+            h += '<td><button class="btn btn-primary btn-sm" data-action="update-clamav">' + tr('Update ClamAV') + '</button></td></tr>';
             h += '<tr><td>Signatures</td><td>' + escapeHtml(sys.signature_version || 'unknown') + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-sigs">Update Sigs</button></td></tr>';
             h += '</table></div>';
@@ -1409,11 +1450,11 @@
     function updateClamAv() {
         API.post('/update/clamav', {}).then(function(data) {
             _lastUpdateDetails = data;
-            toast(data.changed ? 'ClamAV updated' : 'ClamAV already current', 'success');
+            toast(data.changed ? tr('ClamAV updated') : tr('ClamAV already current'), 'success');
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
-            toast('ClamAV update failed: ' + err.message, 'error');
+            toast(tr('ClamAV update failed: ') + err.message, 'error');
             Router.navigate('updates');
         });
     }
@@ -1633,7 +1674,9 @@
                 var info = files[name];
                 h += '<div id="ignore-' + name + '" style="display:' + (name === Object.keys(files)[0] ? 'block' : 'none') + ';">';
                 h += '<p style="font-size:12px;color:var(--text-muted);">' + escapeHtml(info.description) + '</p>';
-                h += '<textarea class="form-textarea" rows="10" style="width:100%;">' + info.lines.map(function(l) { return escapeHtml(l); }).join('\n') + '</textarea></div>';
+                h += '<textarea class="form-textarea" rows="10" style="width:100%;">' + info.lines.map(function(l) { return escapeHtml(l); }).join('\n') + '</textarea>';
+                h += '<button class="btn btn-primary" data-action="save-ignore" data-name="' + escapeHtml(name) + '">' +
+                    tr('Save ignore list') + '</button></div>';
             }
             h += '</div>';
             return h;
@@ -1644,6 +1687,23 @@
         var tabs = document.querySelectorAll('[id^="ignore-"]');
         for (var i = 0; i < tabs.length; i++) tabs[i].style.display = 'none';
         document.getElementById('ignore-' + name).style.display = 'block';
+    }
+
+    function saveIgnore(name, button) {
+        var section = document.getElementById('ignore-' + name);
+        var textarea = section ? section.querySelector('textarea') : null;
+        if (!textarea) return;
+        button.disabled = true;
+        API.put('/ignore', { filename: name, lines: textarea.value.split(/\r?\n/) }).then(function() {
+            return API.get('/ignore');
+        }).then(function() {
+            Router.navigate('ignore');
+            toast(tr('Ignore list saved'), 'success');
+        }).catch(function(err) {
+            toast(tr('Ignore list save failed: ') + err.message, 'error');
+        }).finally(function() {
+            button.disabled = false;
+        });
     }
 
     // ----- Maintenance -----

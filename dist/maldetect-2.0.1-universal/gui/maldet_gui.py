@@ -253,7 +253,7 @@ def prepare_freshclam_log():
 
 
 def prepare_freshclam_config():
-    """Create a temporary config with a writable FreshClam log path."""
+    """Create a temporary config with an exclusive FreshClam log path."""
     for config_path in ("/etc/clamav/freshclam.conf", "/etc/freshclam.conf"):
         try:
             with open(config_path, "r", encoding="utf-8") as config:
@@ -264,23 +264,41 @@ def prepare_freshclam_config():
             return "", "Unable to read FreshClam configuration: " + str(exc)
         lines = contents.splitlines()
         replaced = False
+        log_path = ""
+        log_dir = os.path.dirname(log_path)
+        log_dir = "/var/log/clamav"
+        try:
+            os.makedirs(log_dir, mode=0o755, exist_ok=True)
+            try:
+                clamav_user = pwd.getpwnam("clamav")
+            except KeyError:
+                clamav_user = None
+            if clamav_user and os.geteuid() == 0:
+                os.chown(log_dir, clamav_user.pw_uid, clamav_user.pw_gid)
+            fd, log_path = tempfile.mkstemp(
+                prefix="maldet-freshclam-", suffix=".log", dir=log_dir)
+            os.close(fd)
+            if clamav_user and os.geteuid() == 0:
+                os.chown(log_path, clamav_user.pw_uid, clamav_user.pw_gid)
+        except OSError as exc:
+            return "", "Unable to prepare FreshClam log directory " + log_dir + ": " + str(exc)
         for index, line in enumerate(lines):
             if line.strip().startswith("UpdateLogFile "):
-                lines[index] = "UpdateLogFile /tmp/maldet-freshclam.log"
+                lines[index] = "UpdateLogFile " + log_path
                 replaced = True
                 break
         if not replaced:
-            lines.append("UpdateLogFile /tmp/maldet-freshclam.log")
+            lines.append("UpdateLogFile " + log_path)
         try:
             handle = tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", prefix="maldet-freshclam-",
                 suffix=".conf", delete=False)
             with handle:
                 handle.write("\n".join(lines) + "\n")
-            return handle.name, ""
+            return handle.name, log_path, ""
         except OSError as exc:
-            return "", "Unable to create temporary FreshClam configuration: " + str(exc)
-    return "", ""
+            return "", "", "Unable to create temporary FreshClam configuration: " + str(exc)
+    return "", "", ""
 
 
 def run_clamav_update(force=False):
@@ -302,7 +320,7 @@ def run_clamav_update(force=False):
     # Keep service updates independent of the distro-specific log directory.
     # FreshClam otherwise aborts before contacting the database servers when
     # UpdateLogFile points to a directory that has not been provisioned.
-    config_path, config_error = prepare_freshclam_config()
+    config_path, log_path, config_error = prepare_freshclam_config()
     if config_error:
         return 1, {
             "operation": "clamav database update",
@@ -338,6 +356,11 @@ def run_clamav_update(force=False):
         if config_path:
             try:
                 os.unlink(config_path)
+            except FileNotFoundError:
+                pass
+        if log_path:
+            try:
+                os.unlink(log_path)
             except FileNotFoundError:
                 pass
     after = get_clamav_status()
