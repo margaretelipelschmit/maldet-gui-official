@@ -428,7 +428,7 @@
             h += '<div class="grid grid-4" style="margin-bottom:20px;">';
             h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.version || 'unknown') + '</div><div class="stat-label">Maldet Version</div></div>';
             h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.signature_version || '?') + '</div><div class="stat-label">Signature Set</div></div>';
-            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.clamav_version || '?') + '</div><div class="stat-label">ClamAV</div></div>';
+            h += '<div class="stat ' + (sys.clamav_available ? 'success' : 'danger') + '"><div class="stat-value">' + escapeHtml(sys.clamav_version || '?') + '</div><div class="stat-label">ClamAV Status</div></div>';
             h += '<div class="stat success"><div class="stat-value">' + (sys.active_scans ? sys.active_scans.length : 0) + '</div><div class="stat-label">Active Scans</div></div>';
             h += '<div class="stat ' + (sys.monitor_running ? 'success' : 'danger') + '"><div class="stat-value">' + (sys.monitor_running ? 'ONLINE' : 'OFFLINE') + '</div><div class="stat-label">Monitor</div></div>';
             h += '</div>';
@@ -442,7 +442,7 @@
             h += '<tr><th>Disk</th><td>' + (sys.disk_total_gb || 0) + ' GB total / ' + (sys.disk_free_gb || 0) + ' GB free</td></tr>';
             h += '<tr><th>Install Path</th><td>' + escapeHtml(sys.base_dir) + '</td></tr>';
             h += '<tr><th>Log Directory</th><td>' + escapeHtml(sys.log_dir) + '</td></tr>';
-            h += '<tr><th>ClamAV</th><td>' + escapeHtml(sys.clamav_version || 'unknown') + '</td></tr>';
+            h += '<tr><th>ClamAV</th><td>' + escapeHtml(sys.clamav_version || 'unknown') + ' (' + escapeHtml(sys.clamav_status || 'missing') + ')</td></tr>';
             h += '</table></div></div></div>';
             h += '<div class="card" style="margin-top:16px;"><div class="card-header"><span class="card-title">Binary Detection</span></div>';
             h += '<table><thead><tr><th>Binary</th><th>Path</th><th>Status</th></tr></thead><tbody>';
@@ -1344,7 +1344,7 @@
             var h = '<div class="card"><div class="card-header"><span class="card-title">Updates</span></div><table>';
             h += '<tr><td>LMD Version</td><td>' + escapeHtml(sys.version || 'unknown') + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-ver">Update</button> <button class="btn btn-warning btn-sm" data-action="update-ver-beta">Beta</button></td></tr>';
-            h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || 'unknown') + '</td>';
+            h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || 'unknown') + ' (' + escapeHtml(sys.clamav_status || 'missing') + ')</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-clamav">Update ClamAV</button></td></tr>';
             h += '<tr><td>Signatures</td><td>' + escapeHtml(sys.signature_version || 'unknown') + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-sigs">Update Sigs</button></td></tr>';

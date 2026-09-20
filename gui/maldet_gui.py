@@ -192,9 +192,19 @@ def get_clamav_version():
     return "unknown"
 
 
+def get_clamav_status():
+    """Return a stable status for the ClamAV scanner used by the GUI."""
+    version = get_clamav_version()
+    return {
+        "available": version != "unknown",
+        "version": version,
+        "status": "available" if version != "unknown" else "missing",
+    }
+
+
 def run_clamav_update(force=False):
     """Update the ClamAV database using the host's freshclam command."""
-    before = get_clamav_version()
+    before = get_clamav_status()
     freshclam = shutil.which("freshclam")
     if not freshclam:
         return 127, {
@@ -203,8 +213,8 @@ def run_clamav_update(force=False):
             "returncode": 127,
             "stdout": "",
             "stderr": "freshclam not found in PATH",
-            "before": {"clamav_version": before},
-            "after": {"clamav_version": before},
+            "before": before,
+            "after": before,
             "changed": False,
         }
     command = [freshclam]
@@ -221,19 +231,19 @@ def run_clamav_update(force=False):
             "returncode": 1,
             "stdout": "",
             "stderr": str(exc),
-            "before": {"clamav_version": before},
-            "after": {"clamav_version": before},
+            "before": before,
+            "after": before,
             "changed": False,
         }
-    after = get_clamav_version()
+    after = get_clamav_status()
     return result.returncode, {
         "operation": "clamav database update",
         "status": "completed" if result.returncode == 0 else "failed",
         "returncode": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
-        "before": {"clamav_version": before},
-        "after": {"clamav_version": after},
+        "before": before,
+        "after": after,
         "changed": before != after,
     }
 
@@ -262,6 +272,9 @@ def get_system_info():
         "euid": os.geteuid(),
         "is_root": os.geteuid() == 0,
     }
+    clamav = get_clamav_status()
+    info["clamav_available"] = clamav["available"]
+    info["clamav_status"] = clamav["status"]
 
     # CPU info
     try:
