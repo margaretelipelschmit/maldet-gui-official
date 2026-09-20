@@ -13,8 +13,7 @@ Built with Python 3 standard library only — no pip installs, no frameworks, no
 - **Reports** — View all scan reports, JSON reports, hook scan activity, email reports
 - **Monitoring** — Start/stop/reload inotify monitor, view monitor configuration
 - **Updates** — Update signatures, update maldet version (stable/beta channel)
-- **Configuration** — Full conf.maldet editor organized by sections, with text inputs
-- **Account** — Change the WebGUI password and sign out
+- **Configuration** — Full conf.maldet editor with sections, toggles, and text inputs
 - **Event Log** — View the maldet event log with color-coded entries
 - **Ignore Lists** — Edit ignore_paths, ignore_file_ext, ignore_sigs, ignore_inotify
 - **Maintenance** — Run maintenance tasks, purge data, configure retention
@@ -137,10 +136,16 @@ The GUI provides a JSON API at `/api/*`:
 | `/api/quarantine/stats` | GET | Quarantine statistics |
 | `/api/quarantine/restore` | POST | Restore a file |
 | `/api/quarantine/restore-all` | POST | Restore all validated quarantined files and return per-file results |
+| `/api/quarantine/clean` | POST | `{file: <name>}` — attempt an individual clean of one quarantined file (restores it, applies the matching clean rule, rescans; re-quarantines on failure) |
+| `/api/quarantine/delete` | POST | `{file: <name>}` — permanently delete one quarantined file and its `.info` metadata |
 | `/api/logs` | GET | Event log entries |
 | `/api/monitor` | POST | Start/stop/reload monitor |
+| `/api/monitor/webserver` | GET | Detect running web server + document roots (runs `maldet --webserver-detect`); returns `detected`, `servers`, `docroots` and `autodetect` state |
+| `/api/monitor/webserver` | POST | `{enabled: true|false}` — enable/disable monitoring of the detected document roots (`inotify_docroot_autodetect` in conf.maldet) |
+| `/api/monitor/activity` | GET | Tail the monitor's `inotify_log` in real time; returns `running`, `total_events` and `entries` (`{file, event, time}`, newest first) |
 | `/api/update/sigs` | POST | Update signatures |
 | `/api/update/version` | POST | Update maldet version |
+| `/api/update/clamav` | POST | Update the ClamAV database with `freshclam` |
 | `/api/test-alert` | POST | Send test alert |
 | `/api/purge` | POST | Purge all data |
 | `/api/maintenance` | POST | Run maintenance |

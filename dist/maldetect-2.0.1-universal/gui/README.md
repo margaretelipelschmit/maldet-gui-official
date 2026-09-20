@@ -45,7 +45,7 @@ chmod +x launch.sh
 ### Quick Start
 
 ```bash
-# Start the GUI (binds to localhost:8080 by default)
+# Start the GUI (binds to localhost:32501 by default)
 ./launch.sh
 
 # Start the server in the background and open the browser
@@ -55,7 +55,11 @@ chmod +x launch.sh
 python3 maldet_gui.py
 ```
 
-Then open your browser to: **http://127.0.0.1:8080**
+Then open your browser to: **http://127.0.0.1:32501**
+
+When installed as `maldet-gui.service`, the service listens on all VPS
+interfaces at port 32501. Remote access uses **http://SERVER_ADDRESS:32501**.
+The GUI is HTTP-only; use a reverse proxy such as nginx or Caddy for HTTPS.
 
 ### System tray
 
@@ -73,7 +77,7 @@ exits with an actionable message when `yad` or a graphical session is absent.
 Environment variables:
 
 ```
-MALDET_GUI_URL=http://127.0.0.1:8080
+MALDET_GUI_URL=http://127.0.0.1:32501
 MALDET_SYSTRAY_INTERVAL=5
 MALDET_SYSTRAY_START_GUI=1
 ```
@@ -85,7 +89,7 @@ python3 maldet_gui.py [OPTIONS]
 
 Options:
   --host HOST        Bind address (default: 127.0.0.1)
-  --port PORT        Port number (default: 8080)
+  --port PORT        Port number (default: 32501)
   --base-dir PATH    Maldet installation directory (default: /usr/local/maldetect)
   --maldet-bin PATH  Path to maldet binary (default: auto-detect)
 ```
@@ -97,7 +101,7 @@ Options:
 python3 maldet_gui.py --port 9090
 
 # Run on all interfaces (for remote access)
-python3 maldet_gui.py --host 0.0.0.0 --port 8080
+python3 maldet_gui.py --host 0.0.0.0 --port 32501
 
 # Specify custom maldet installation
 python3 maldet_gui.py --base-dir /opt/maldet --maldet-bin /usr/local/sbin/maldet
@@ -105,8 +109,10 @@ python3 maldet_gui.py --base-dir /opt/maldet --maldet-bin /usr/local/sbin/maldet
 
 ## Security Notes
 
-- By default, the GUI binds to `127.0.0.1` (localhost only)
+- The manual launcher binds to `127.0.0.1` by default (localhost only)
+- The installed systemd service binds to `0.0.0.0:32501` for VPS access
 - For remote access, use `--host 0.0.0.0` and ensure proper firewall rules
+- Do not use `https://SERVER_ADDRESS:32501` unless TLS is configured by a reverse proxy
 - The GUI executes maldet commands with the privileges of the running user
 - For production use, consider running behind a reverse proxy with authentication
 - All maldet operations require appropriate permissions (root for most operations)
@@ -129,10 +135,17 @@ The GUI provides a JSON API at `/api/*`:
 | `/api/quarantine` | GET | List quarantined files |
 | `/api/quarantine/stats` | GET | Quarantine statistics |
 | `/api/quarantine/restore` | POST | Restore a file |
+| `/api/quarantine/restore-all` | POST | Restore all validated quarantined files and return per-file results |
+| `/api/quarantine/clean` | POST | `{file: <name>}` — attempt an individual clean of one quarantined file (restores it, applies the matching clean rule, rescans; re-quarantines on failure) |
+| `/api/quarantine/delete` | POST | `{file: <name>}` — permanently delete one quarantined file and its `.info` metadata |
 | `/api/logs` | GET | Event log entries |
 | `/api/monitor` | POST | Start/stop/reload monitor |
+| `/api/monitor/webserver` | GET | Detect running web server + document roots (runs `maldet --webserver-detect`); returns `detected`, `servers`, `docroots` and `autodetect` state |
+| `/api/monitor/webserver` | POST | `{enabled: true|false}` — enable/disable monitoring of the detected document roots (`inotify_docroot_autodetect` in conf.maldet) |
+| `/api/monitor/activity` | GET | Tail the monitor's `inotify_log` in real time; returns `running`, `total_events` and `entries` (`{file, event, time}`, newest first) |
 | `/api/update/sigs` | POST | Update signatures |
 | `/api/update/version` | POST | Update maldet version |
+| `/api/update/clamav` | POST | Update the ClamAV database with `freshclam` |
 | `/api/test-alert` | POST | Send test alert |
 | `/api/purge` | POST | Purge all data |
 | `/api/maintenance` | POST | Run maintenance |

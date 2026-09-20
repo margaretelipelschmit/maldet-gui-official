@@ -230,6 +230,7 @@ usage: maldet [OPTION] [ARGUMENT]
     -c|--checkout FILE          submit suspected malware to rfxn.com
     --test-alert TYPE CHANNEL   send test alert (scan|digest, email|telegram)
     --mkpubpaths                create per-user pub/ data directories
+    --webserver-detect          detect running web server + document roots
     --web-proxy IP:PORT         set HTTP/HTTPS proxy
     -v|--version                show version information
     -h|--help                   show detailed help
@@ -296,6 +297,15 @@ MONITORING:
 
     -k, --kill-monitor (also: -kill)
        Terminate inotify monitoring service
+
+    --webserver-detect
+       Detect the running web server (Apache/httpd, nginx, LiteSpeed/
+       OpenLiteSpeed, lighttpd, caddy) and print its document root(s),
+       plus the inotify_docroot_autodetect state. Enable
+       inotify_docroot_autodetect="1" in conf.maldet to add the detected
+       document roots to `maldet --monitor users` monitoring.
+       Exits 0 when a web server is detected, 1 when none is found.
+       e.g: maldet --webserver-detect
 
 QUARANTINE & RESTORE:
     -q, --quarantine SCANID
@@ -584,6 +594,10 @@ else
 					exit 1
 				fi
 				genalert digest
+			;;
+			--webserver-detect)
+				header
+				webserver_detect_report || exit $?
 			;;
 			--digest)
 				_lmd_alert_init

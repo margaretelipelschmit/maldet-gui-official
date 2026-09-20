@@ -4,7 +4,7 @@
 #
 set -euo pipefail
 
-URL="${MALDET_GUI_URL:-http://127.0.0.1:${MALDET_GUI_PORT:-8080}}"
+URL="${MALDET_GUI_URL:-http://127.0.0.1:${MALDET_GUI_PORT:-32501}}"
 INTERVAL="${MALDET_SYSTRAY_INTERVAL:-5}"
 START_GUI="${MALDET_SYSTRAY_START_GUI:-1}"
 GUI_LAUNCHER="${MALDET_GUI_LAUNCHER:-/usr/local/sbin/maldet-gui}"
@@ -74,7 +74,7 @@ ensure_gui() {
 
 status_text() {
 	ensure_gui >/dev/null 2>&1 || true
-	python3 - "$URL/api/scans/active" <<'PY'
+	python3 - "$URL/api/systray/status" <<'PY'
 import json
 import sys
 from urllib.error import URLError
@@ -83,18 +83,15 @@ from urllib.request import urlopen
 try:
     with urlopen(sys.argv[1], timeout=3) as response:
         data = json.loads(response.read().decode("utf-8"))
-    scans = data.get("active_scans", data.get("active", []))
-    if not isinstance(scans, list):
-        scans = []
-    if not scans:
+    if not data.get("available"):
+        raise OSError(data.get("error", "status unavailable"))
+    count = int(data.get("active_count", 0))
+    states = data.get("states", {})
+    if not count:
         print("Maldet: no active scans")
     else:
-        states = {}
-        for scan in scans:
-            state = str(scan.get("state", "running"))
-            states[state] = states.get(state, 0) + 1
         summary = ", ".join("%s=%d" % item for item in sorted(states.items()))
-        print("Maldet: %d active scan(s) (%s)" % (len(scans), summary))
+        print("Maldet: %d active scan(s) (%s)" % (count, summary))
 except (OSError, URLError, ValueError, TypeError) as exc:
     print("Maldet: WebGUI unavailable (%s)" % exc)
 PY

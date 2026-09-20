@@ -1,3 +1,0 @@
-*{{HIT_SIGNATURE}}*
-`{{HIT_FILE}}` \| {{HIT_TYPE_LABEL}} \| {{QUARANTINE_STATUS}}
-

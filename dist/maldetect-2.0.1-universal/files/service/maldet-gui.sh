@@ -17,7 +17,7 @@ logfile=/var/log/maldet/gui.log
 [ -f /etc/default/maldet-gui ] && . /etc/default/maldet-gui
 [ -f /etc/sysconfig/maldet-gui ] && . /etc/sysconfig/maldet-gui
 MALDET_GUI_HOST="${MALDET_GUI_HOST:-127.0.0.1}"
-MALDET_GUI_PORT="${MALDET_GUI_PORT:-8080}"
+MALDET_GUI_PORT="${MALDET_GUI_PORT:-32501}"
 MALDET_BIN="${MALDET_BIN:-/usr/local/sbin/maldet}"
 
 start() {
