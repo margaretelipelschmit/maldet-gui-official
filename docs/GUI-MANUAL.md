@@ -1,5 +1,9 @@
 # Manual de utilização da Maldet WebGUI
 
+Para versões resumidas com capturas das telas principais, consulte o
+[Manual rápido ilustrado em português](GUI-MANUAL-ILUSTRADO.md) ou o
+[English Illustrated Quick Guide](GUI-MANUAL-ILLUSTRATED.md).
+
 ## 1. Visão geral
 
 A Maldet WebGUI é a interface web do Linux Malware Detect (Maldet). Ela

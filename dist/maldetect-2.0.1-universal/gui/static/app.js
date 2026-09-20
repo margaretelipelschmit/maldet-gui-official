@@ -32,7 +32,11 @@
                         showAuthScreen(data.setup_required);
                         reject(new Error(data.error || 'Authentication required'));
                     } else if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-                    else reject(new Error(data.error || ('Request failed (' + xhr.status + ')')));
+                    else {
+                        var error = new Error(data.error || ('Request failed (' + xhr.status + ')'));
+                        error.data = data;
+                        reject(error);
+                    }
                 };
 
                 xhr.onerror = function() {
@@ -146,8 +150,8 @@
             'Start Scan': 'Iniciar scan', 'Preparing...': 'Preparando...', 'Starting...': 'Iniciando...',
             'Choose scan folder': 'Escolher pasta do scan', 'Cancel': 'Cancelar',
             'Select this folder': 'Selecionar esta pasta', 'Active Scans': 'Scans ativos',
-            'Live updates every 5s': 'Atualização ao vivo a cada 5 s',
-            'Live updates every 10s': 'Atualização ao vivo a cada 10 s', 'Details': 'Detalhes',
+            'Live updates every 3s': 'Atualização ao vivo a cada 3 s',
+            'Live updates every 5s': 'Atualização ao vivo a cada 5 s', 'Details': 'Detalhes',
             'Stop': 'Parar', 'Stopping...': 'Parando...', 'Close': 'Fechar',
             'Quarantined Files': 'Arquivos em quarentena', 'Scan Reports': 'Relatórios de scans',
             'Quarantine': 'Quarentenar', 'Restore': 'Restaurar', 'Inotify Monitoring': 'Monitoramento inotify',
@@ -177,7 +181,59 @@
                 'Selecione os usuários cujos diretórios home serão monitorados. As alterações entram em vigor após Recarregar.',
             'Save user selection': 'Salvar seleção de usuários',
             'No eligible home users found.': 'Nenhum usuário elegível em /home foi encontrado.',
-            'Enabled': 'Habilitado', 'Disabled': 'Desabilitado'
+            'Web server detection': 'Detecção de servidor web',
+            'Web server detection is unavailable.': 'A detecção de servidor web está indisponível.',
+            'No running web server detected.': 'Nenhum servidor web em execução foi detectado.',
+            'Detected web server:': 'Servidor web detectado:',
+            'Document roots detected:': 'Document roots detectados:',
+            'No document roots found in the server configuration.': 'Nenhum document root encontrado na configuração do servidor.',
+            'Monitor detected document roots (e.g. public_html)': 'Monitorar document roots detectados (ex.: public_html)',
+            'Changes take effect after Reload or restarting the monitor.': 'As alterações entram em vigor após Recarregar ou reiniciar o monitor.',
+            'Save': 'Salvar',
+            'public_html': 'public_html',
+            'Monitoring of detected document roots (e.g. public_html) enabled': 'Monitoramento dos document roots detectados (ex.: public_html) habilitado',
+            'Monitoring of detected document roots (e.g. public_html) disabled': 'Monitoramento dos document roots detectados (ex.: public_html) desabilitado',
+            'Web server monitoring updated': 'Monitoramento do servidor web atualizado',
+            'Quarantined Files': 'Arquivos em quarentena',
+            'No files in quarantine.': 'Nenhum arquivo em quarentena.',
+            'Details': 'Detalhes',
+            'Restore': 'Restaurar',
+            'Restore all': 'Restaurar tudo',
+            'Restore all quarantined files?': 'Restaurar todos os arquivos em quarentena?',
+            'Clean': 'Limpar',
+            'Delete': 'Excluir',
+            'File restored successfully': 'Arquivo restaurado com sucesso',
+            'Quarantined file deleted': 'Arquivo em quarentena excluído',
+            'File cleaned successfully (restored to original path)': 'Arquivo limpo com sucesso (restaurado ao caminho original)',
+            'All quarantined files restored': 'Todos os arquivos em quarentena foram restaurados',
+            'Try to clean': 'Tentar limpar',
+            'Permanently delete': 'Excluir permanentemente',
+            'from quarantine?': 'da quarentena?',
+            'This cannot be undone — the file will NOT be restored.': 'Esta ação não pode ser desfeita — o arquivo NÃO será restaurado.',
+            'The file is restored to its original location, cleaned with the matching maldet clean rule and rescanned. If cleaning fails, it is moved back to quarantine.':
+                'O arquivo é restaurado ao local original, limpo com a regra de limpeza correspondente do maldet e reescaneado. Se a limpeza falhar, ele volta para a quarentena.',
+            'Monitor activity': 'Atividade do monitor',
+            'Live': 'Ao vivo',
+            'Files detected by inotify (create/move/modify) in real time, newest first. These are queued for the monitor scan batches.':
+                'Arquivos detectados pelo inotify (criação/movimentação/modificação) em tempo real, mais recentes primeiro. Eles entram na fila dos lotes de scan do monitor.',
+            'No monitored file activity yet. New, moved or modified files will appear here as the monitor detects them.':
+                'Nenhuma atividade de arquivos monitorados ainda. Arquivos novos, movidos ou modificados aparecerão aqui conforme o monitor os detectar.',
+            'Monitor is stopped — no live activity. Start the monitor to watch files in real time.':
+                'O monitor está parado — sem atividade em tempo real. Inicie o monitor para acompanhar arquivos em tempo real.',
+            'events logged': 'eventos registrados',
+            'Enabled': 'Habilitado', 'Disabled': 'Desabilitado',
+            'Security': 'Segurança',
+            'Change the WebGUI password. Password must contain at least 8 characters.':
+                'Altere a senha da WebGUI. A senha deve ter no mínimo 8 caracteres.',
+            'Current password': 'Senha atual',
+            'New password': 'Nova senha',
+            'Confirm password': 'Confirmar senha',
+            'Change password': 'Alterar senha',
+            'Please fill in all password fields.': 'Preencha todos os campos de senha.',
+            'New password must contain at least 8 characters.': 'A nova senha deve ter no mínimo 8 caracteres.',
+            'New passwords do not match.': 'As novas senhas não coincidem.',
+            'Password changed successfully.': 'Senha alterada com sucesso.',
+            'Password change failed: ': 'Falha ao alterar a senha: '
         }
     };
     function tr(text) {
@@ -206,6 +262,7 @@
     var _scanManagementTimer = null;
     var _scanManagementInterval = 5000;
     var _scanPreparing = false;
+    var _scanStartInFlight = false;
     var _scanCompletionPending = false;
     var _scanCompletionIds = {};
     var _scanCompletionPrompted = {};
@@ -247,6 +304,9 @@
             if (this.currentPage === 'scan-management' && name !== 'scan-management') {
                 stopScanManagementRefresh();
             }
+            if (this.currentPage === 'monitoring' && name !== 'monitoring') {
+                stopMonitorActivityRefresh();
+            }
             this.currentPage = name;
             var items = document.querySelectorAll('.nav-item');
             for (var i = 0; i < items.length; i++) {
@@ -256,7 +316,7 @@
             var titles = {
                 dashboard: tr('Dashboard'), scanner: tr('Scanner'), 'scan-management': tr('Scan Management'),
                 quarantine: tr('Quarantine'), reports: tr('Reports'), monitoring: tr('Monitoring'),
-                updates: tr('Updates'), config: tr('Configuration'), alerts: tr('Test Alerts'),
+                updates: tr('Updates'), security: tr('Security'), config: tr('Configuration'), alerts: tr('Test Alerts'),
                 logs: tr('Event Log'), ignore: tr('Ignore Lists'), maintenance: tr('Maintenance'), system: tr('System Info'),
                 about: tr('About Maldet')
             };
@@ -269,6 +329,7 @@
                     content.innerHTML = html;
                     translateDom(content);
                     if (name === 'scan-management') startScanManagementRefresh();
+                    if (name === 'monitoring') startMonitorActivityRefresh();
                 }).catch(function(err) {
                     content.innerHTML = '<div class="card"><p style="color:red;">Error: ' + escapeHtml(err.message) + '</p></div>';
                 });
@@ -323,15 +384,22 @@
                 else if (action === 'scan-restore') scanAction(el.getAttribute('data-id'), 'restore');
                 else if (action === 'quarantine-details') openQuarantineDetails(el.getAttribute('data-file'));
                 else if (action === 'quarantine-details-close') closeQuarantineDetails();
+                else if (action === 'quarantine-restore') restoreQuarantineFile(el.getAttribute('data-file'));
+                else if (action === 'quarantine-clean') cleanQuarantineFile(el.getAttribute('data-file'));
+                else if (action === 'quarantine-delete') deleteQuarantineFile(el.getAttribute('data-file'));
+                else if (action === 'quarantine-restore-all') restoreAllQuarantineFiles();
                 else if (action === 'monitor-start') monitorStart();
                 else if (action === 'monitor-stop') monitorStop();
                 else if (action === 'monitor-reload') monitorReload();
                 else if (action === 'monitor-save-users') saveMonitorUsers();
+                else if (action === 'monitor-save-webserver') saveMonitorWebserver();
                 else if (action === 'update-ver') updateVer(false);
                 else if (action === 'update-ver-beta') updateVer(true);
+                else if (action === 'update-clamav') updateClamAv();
                 else if (action === 'update-sigs') updateSigs();
                 else if (action === 'save-config') saveConfig();
                 else if (action === 'change-password') changePassword();
+                else if (action === 'security-change-password') securityChangePassword();
                 else if (action === 'send-alert') sendAlert();
                 else if (action === 'ignore-tab') showIgnoreTab(el.getAttribute('data-name'));
                 else if (action === 'scanner-tab') switchScannerTab(el.getAttribute('data-tab'));
@@ -340,6 +408,7 @@
                 else if (action === 'about-language') document.getElementById('language-select').focus();
                 else if (action === 'about-refresh') Router.navigate('about');
                 else if (action === 'about-settings') Router.navigate('config');
+                else if (action === 'refresh') Router.navigate(Router.currentPage);
             });
             document.getElementById('content').addEventListener('change', function(e) {
                 if (e.target && e.target.id === 'scan_type') updateScanTypeFields(e.target.value);
@@ -360,6 +429,7 @@
             h += '<div class="grid grid-4" style="margin-bottom:20px;">';
             h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.version || 'unknown') + '</div><div class="stat-label">Maldet Version</div></div>';
             h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.signature_version || '?') + '</div><div class="stat-label">Signature Set</div></div>';
+            h += '<div class="stat ' + (sys.clamav_available ? 'success' : 'danger') + '"><div class="stat-value">' + escapeHtml(sys.clamav_version || '?') + '</div><div class="stat-label">ClamAV Status</div></div>';
             h += '<div class="stat success"><div class="stat-value">' + (sys.active_scans ? sys.active_scans.length : 0) + '</div><div class="stat-label">Active Scans</div></div>';
             h += '<div class="stat ' + (sys.monitor_running ? 'success' : 'danger') + '"><div class="stat-value">' + (sys.monitor_running ? 'ONLINE' : 'OFFLINE') + '</div><div class="stat-label">Monitor</div></div>';
             h += '</div>';
@@ -373,6 +443,7 @@
             h += '<tr><th>Disk</th><td>' + (sys.disk_total_gb || 0) + ' GB total / ' + (sys.disk_free_gb || 0) + ' GB free</td></tr>';
             h += '<tr><th>Install Path</th><td>' + escapeHtml(sys.base_dir) + '</td></tr>';
             h += '<tr><th>Log Directory</th><td>' + escapeHtml(sys.log_dir) + '</td></tr>';
+            h += '<tr><th>ClamAV</th><td>' + escapeHtml(sys.clamav_version || 'unknown') + ' (' + escapeHtml(sys.clamav_status || 'missing') + ')</td></tr>';
             h += '</table></div></div></div>';
             h += '<div class="card" style="margin-top:16px;"><div class="card-header"><span class="card-title">Binary Detection</span></div>';
             h += '<table><thead><tr><th>Binary</th><th>Path</th><th>Status</th></tr></thead><tbody>';
@@ -404,7 +475,7 @@
             h += '<div class="form-group"><label class="form-label">Include Regex (-i)</label><input type="text" class="form-input" id="scan_inc" placeholder=".*\\.php$"></div>';
             h += '<div class="form-group"><label class="form-label">Exclude Regex (-x)</label><input type="text" class="form-input" id="scan_exc" placeholder=".*\\.log"></div></div>';
             h += '<div class="form-group"><label class="form-label">Options</label><label style="font-size:13px;"><input type="checkbox" id="scan_bg" checked> Run in background (recommended)</label></div>';
-            h += '<div id="scan_summary" class="alert alert-info">Ready to scan <strong>/home</strong>.</div>';
+            h += '<div id="scan_summary" class="alert alert-info">Ready to scan <strong>Full Scan</strong> on <code>/home</code>. No scan has started yet.</div>';
             h += '<button class="btn btn-primary" id="start-scan-btn" data-action="start-scan">Start Scan</button></div>';
             return h;
         });
@@ -422,11 +493,15 @@
     function updateScanSummary() {
         var path = document.getElementById('scan_path');
         var type = document.getElementById('scan_type');
+        var days = document.getElementById('scan_days');
         var summary = document.getElementById('scan_summary');
         if (!path || !type || !summary) return;
         var label = type.options[type.selectedIndex].text;
+        var value = path.value.trim() || '(enter a path)';
+        var detail = type.value === 'recent' ? ' · modified within ' +
+            escapeHtml((days && days.value) || '2') + ' day(s)' : '';
         summary.innerHTML = 'Ready to run <strong>' + escapeHtml(label) + '</strong> on <code>' +
-            escapeHtml(path.value.trim() || '(enter a path)') + '</code>.';
+            escapeHtml(value) + '</code>' + detail + '. <span>No scan has started yet.</span>';
     }
 
     function closeFolderPicker() {
@@ -505,6 +580,7 @@
     }
 
     function startScan() {
+        if (_scanStartInFlight) return;
         var scanTypeEl = document.getElementById('scan_type');
         var scanPathEl = document.getElementById('scan_path');
         var scanDaysEl = document.getElementById('scan_days');
@@ -550,9 +626,10 @@
             if (button && button.disabled) button.textContent = 'Starting...';
         }, 500);
         _scanPreparing = true;
-        Router.navigate('scan-management');
+        _scanStartInFlight = true;
         API.post('/scan', body).then(function(resp) {
             _scanPreparing = false;
+            _scanStartInFlight = false;
             if (resp.scan_started) {
                 _scanCompletionPending = true;
                 _scanCompletionIds = {};
@@ -562,9 +639,10 @@
             else if (resp.clean) toast('Scan complete - no malware', 'success');
             else if (resp.scan_started) toast('Scan started in background', 'success');
             else toast(resp.message || 'Scan started', 'info');
-            Router.navigate(body.background ? 'scan-management' : 'reports');
+            Router.navigate(resp.scan_started ? 'scan-management' : 'reports');
         }).catch(function(e) {
             _scanPreparing = false;
+            _scanStartInFlight = false;
             toast('Error: ' + e.message, 'error');
             Router.navigate('scan-management');
         });
@@ -572,7 +650,14 @@
 
     // ----- Scan Management -----
     function buildScanManagementHtml(active) {
-        var refreshLabel = active.length > 0 ? 'Live updates every 10s' : 'Live updates every 5s';
+        var unique = {};
+        active = active.filter(function(scan) {
+            var id = scan && scan.scan_id;
+            if (!id || unique[id]) return false;
+            unique[id] = true;
+            return true;
+        });
+        var refreshLabel = active.length > 0 ? 'Live updates every 3s' : 'Live updates every 5s';
         var h = '<div class="card"><div class="card-header"><span class="card-title">Active Scans (' + active.length + ')</span><span style="font-size:12px;color:var(--text-muted);">' + tr(refreshLabel) + '</span></div>';
         if (_scanPreparing) {
             h += '<div class="alert alert-info" style="margin:12px 0;"><strong>Preparing scan...</strong><br><small>Validating the path and starting the Maldet process.</small></div>';
@@ -586,17 +671,18 @@
                 var progress = s.progress || {};
                 var scanned = Number(progress.position || s.files_scanned || 0);
                 var total = Number(progress.total || s.total_files || 0);
-                var opaqueEngine = s.engine === 'clamdscan' || s.engine === 'yara';
-                var percent = total > 0 ? Math.min(100, Math.max(0, (scanned / total) * 100)) : 0;
-                var progressText = (opaqueEngine && scanned === 0) ? 'Progress unavailable' :
-                    (total > 0 ? Math.round(percent) + '%' : 'Progress unavailable');
+                var elapsed = Number(s.elapsed);
+                var scanClockStarted = Number.isFinite(elapsed) && elapsed === 0;
+                var progressStarted = total > 0 && (scanClockStarted || scanned > 0);
+                var percent = progressStarted ? Math.min(100, Math.max(0, (scanned / total) * 100)) : 0;
+                var progressText = progressStarted && total > 0 ? Math.round(percent) + '%' : '';
                 var currentFile = progress.current_file || s.current_file || '';
-                var currentFileHtml = currentFile ? '<div class="scan-current-file" title="' + escapeHtml(currentFile) + '">Current: ' + escapeHtml(currentFile) + '</div>' : '';
-                var progressBar = '<div class="scan-progress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.round(percent) + '">' +
+                var currentFileHtml = progressStarted && currentFile ? '<div class="scan-current-file" title="' + escapeHtml(currentFile) + '">Current: ' + escapeHtml(currentFile) + '</div>' : '';
+                var progressBar = progressStarted ? '<div class="scan-progress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.round(percent) + '">' +
                     '<div class="scan-progress-track"><div class="scan-progress-fill" style="width:' + percent.toFixed(1) + '%;"></div></div>' +
-                    '<span class="scan-progress-label">' + progressText + '</span>' + currentFileHtml + '</div>';
-                var filesText = (opaqueEngine && scanned === 0) ? ('total ' + total + ' <small class="form-help">progress unavailable</small>') :
-                    ((scanned > 0 || total > 0) ? (scanned + ' / ' + total) : 'n/a');
+                    '<span class="scan-progress-label">' + progressText + '</span>' + currentFileHtml + '</div>' :
+                    '<span class="form-help">Waiting for first file...</span>';
+                var filesText = progressStarted ? (scanned + ' / ' + total) : 'Waiting for scan start';
                 h += '<tr><td>' + escapeHtml(s.scan_id) + '</td><td style="font-size:12px;max-width:260px;word-break:break-all;">' + escapeHtml(s.path || '-') + '</td><td>' + escapeHtml(s.state) + '</td><td>' + escapeHtml(s.engine || '-') + '</td>';
                 var hitCount = Number(s.hits || 0);
                 var hitLabel = hitCount > 0 ?
@@ -635,7 +721,7 @@
             }
             var content = document.getElementById('content');
             if (content) content.innerHTML = buildScanManagementHtml(active);
-            var desiredInterval = active.length > 0 ? 10000 : 5000;
+            var desiredInterval = active.length > 0 ? 3000 : 5000;
             if (_scanManagementInterval !== desiredInterval) {
                 _scanManagementInterval = desiredInterval;
                 startScanManagementRefresh();
@@ -661,7 +747,9 @@
 
     function renderScanManagement() {
         return API.get('/scans/active').then(function(data) {
-            return buildScanManagementHtml(data.active_scans || []);
+            var active = data.active_scans || [];
+            _scanManagementInterval = active.length > 0 ? 3000 : 5000;
+            return buildScanManagementHtml(active);
         });
     }
 
@@ -722,7 +810,11 @@
     function renderQuarantine() {
         return API.get('/quarantine').then(function(data) {
             var files = data.files || [];
-            var h = '<div class="card"><div class="card-header"><span class="card-title">Quarantined Files (' + files.length + ')</span></div>';
+            var h = '<div class="card"><div class="card-header"><span class="card-title">Quarantined Files (' + files.length + ')</span>';
+            if (files.length) {
+                h += '<button class="btn btn-primary btn-sm" data-action="quarantine-restore-all">Restore all</button>';
+            }
+            h += '</div>';
             if (files.length === 0) {
                 h += '<p style="padding:12px;color:var(--text-muted);">No files in quarantine.</p>';
             } else {
@@ -731,7 +823,10 @@
                     var f = files[i];
                     h += '<tr><td><code>' + escapeHtml(f.name) + '</code></td><td>' + escapeHtml(f.signature || '-') + '</td>';
                     h += '<td style="font-size:12px;">' + escapeHtml(f.original_path || '-') + '</td><td>' + fmtSize(f.size) + '</td>';
-                    h += '<td><button class="btn btn-ghost btn-sm" data-action="quarantine-details" data-file="' + escapeHtml(f.name) + '">Details</button></td></tr>';
+                    h += '<td><button class="btn btn-ghost btn-sm" data-action="quarantine-details" data-file="' + escapeHtml(f.name) + '">Details</button> ';
+                    h += '<button class="btn btn-primary btn-sm" data-action="quarantine-restore" data-file="' + escapeHtml(f.name) + '">Restore</button> ';
+                    h += '<button class="btn btn-warning btn-sm" data-action="quarantine-clean" data-file="' + escapeHtml(f.name) + '">Clean</button> ';
+                    h += '<button class="btn btn-danger btn-sm" data-action="quarantine-delete" data-file="' + escapeHtml(f.name) + '">Delete</button></td></tr>';
                 }
                 h += '</tbody></table>';
             }
@@ -771,6 +866,106 @@
         if (modal) modal.remove();
     }
 
+    function restoreQuarantineFile(filename) {
+        if (!filename || !confirm('Restore ' + filename + '?')) return;
+        var button = null;
+        document.querySelectorAll('[data-action="quarantine-restore"]').forEach(function(candidate) {
+            if (candidate.getAttribute('data-file') === filename) button = candidate;
+        });
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Restoring...';
+        }
+        API.post('/quarantine/restore', { file: filename }).then(function(data) {
+            if (data.returncode !== undefined && data.returncode !== 0 && data.returncode !== 2) {
+                throw new Error(data.stderr || data.stdout || 'Restore failed');
+            }
+            toast('File restored successfully', 'success');
+            Router.navigate('quarantine');
+        }).catch(function(err) {
+            toast('Restore failed: ' + err.message, 'error');
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Restore';
+            }
+        });
+    }
+
+    function cleanQuarantineFile(filename) {
+        if (!filename || !confirm('Try to clean ' + filename + '?\n\nThe file is restored to its original location, cleaned with the matching maldet clean rule and rescanned. If cleaning fails, it is moved back to quarantine.')) return;
+        var button = null;
+        document.querySelectorAll('[data-action="quarantine-clean"]').forEach(function(candidate) {
+            if (candidate.getAttribute('data-file') === filename) button = candidate;
+        });
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Cleaning...';
+        }
+        API.post('/quarantine/clean', { file: filename }).then(function(data) {
+            if (data.returncode !== undefined && data.returncode !== 0 && data.returncode !== 2) {
+                throw new Error(data.stderr || data.stdout || 'Clean failed');
+            }
+            if (data.cleaned) {
+                toast('File cleaned successfully (restored to original path)', 'success');
+            } else {
+                toast('Clean attempted; no clean rule matched or cleaning failed — file remains in quarantine. Check the output: ' +
+                    (data.stderr || data.stdout || '').trim().split('\n').slice(-1)[0], 'info', 8000);
+            }
+            Router.navigate('quarantine');
+        }).catch(function(err) {
+            toast('Clean failed: ' + err.message, 'error');
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Clean';
+            }
+        });
+    }
+
+    function deleteQuarantineFile(filename) {
+        if (!filename || !confirm('Permanently delete ' + filename + ' from quarantine?\n\nThis cannot be undone — the file will NOT be restored.')) return;
+        var button = null;
+        document.querySelectorAll('[data-action="quarantine-delete"]').forEach(function(candidate) {
+            if (candidate.getAttribute('data-file') === filename) button = candidate;
+        });
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Deleting...';
+        }
+        API.post('/quarantine/delete', { file: filename }).then(function(data) {
+            toast('Quarantined file deleted', 'success');
+            Router.navigate('quarantine');
+        }).catch(function(err) {
+            toast('Delete failed: ' + err.message, 'error');
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Delete';
+            }
+        });
+    }
+
+    function restoreAllQuarantineFiles() {
+        var buttons = document.querySelectorAll('[data-action="quarantine-restore-all"]');
+        if (!buttons.length || !confirm('Restore all quarantined files?')) return;
+        buttons.forEach(function(button) {
+            button.disabled = true;
+            button.textContent = 'Restoring all...';
+        });
+        API.post('/quarantine/restore-all', {}).then(function(data) {
+            if (data.failed) {
+                toast('Restored ' + data.restored + '; failed: ' + data.failed, 'error');
+            } else {
+                toast('All quarantined files restored (' + data.restored + ')', 'success');
+            }
+            Router.navigate('quarantine');
+        }).catch(function(err) {
+            toast('Restore all failed: ' + err.message, 'error');
+            buttons.forEach(function(button) {
+                button.disabled = false;
+                button.textContent = 'Restore all';
+            });
+        });
+    }
+
     function openReportDetails(scanId) {
         var old = document.getElementById('report-details-modal');
         if (old) old.remove();
@@ -784,7 +979,29 @@
         document.body.appendChild(modal);
         API.get('/scan/' + encodeURIComponent(scanId)).then(function(data) {
             var body = modal.querySelector('.modal-body');
-            if (body) body.innerHTML = '<pre class="report-json">' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>';
+            if (!body) return;
+            var report = data.reports && data.reports[0] ? data.reports[0] : data;
+            var hits = report.hits || report.detections || [];
+            var totalHits = Number(report.total_hits);
+            if (!Number.isFinite(totalHits)) totalHits = hits.length;
+            var h = '<div class="report-summary"><strong>' + totalHits + ' hit(s)</strong>';
+            if (report.path) h += ' · ' + escapeHtml(report.path);
+            if (report.completed) h += ' · ' + escapeHtml(report.completed);
+            h += '</div>';
+            if (hits.length) {
+                h += '<table><thead><tr><th>File</th><th>Signature</th><th>Hash</th></tr></thead><tbody>';
+                hits.forEach(function(hit) {
+                    h += '<tr><td>' + escapeHtml(hit.file || hit.path || hit.filename || '-') + '</td>' +
+                        '<td>' + escapeHtml(hit.signature || hit.sig || hit.name || '-') + '</td>' +
+                        '<td><code>' + escapeHtml(hit.md5 || hit.hash || '-') + '</code></td></tr>';
+                });
+                h += '</tbody></table>';
+            } else {
+                h += '<p style="color:var(--text-muted);">No hit details were returned by Maldet.</p>';
+            }
+            h += '<details><summary>JSON completo</summary><pre class="report-json">' +
+                escapeHtml(JSON.stringify(data, null, 2)) + '</pre></details>';
+            body.innerHTML = h;
         }).catch(function(err) {
             var body = modal.querySelector('.modal-body');
             if (body) body.innerHTML = '<p style="color:var(--danger);">Error loading report: ' + escapeHtml(err.message) + '</p>';
@@ -800,21 +1017,37 @@
     function renderReports() {
         return API.get('/scans').then(function(data) {
             var reports = data.reports || [];
-            var h = '<div class="card"><div class="card-header"><span class="card-title">Scan Reports (' + reports.length + ')</span></div>';
+            var active = data.active || data.active_scans || [];
+            var stopped = data.stopped || data.stopped_scans || [];
+            var h = '<div class="card"><div class="card-header"><span class="card-title">' +
+                tr('Scan Reports') + ' (' + reports.length + ')</span><button class="btn btn-ghost btn-sm" data-action="refresh">🔄</button></div>';
+            if (active.length || stopped.length) {
+                h += '<div class="alert alert-warning">' + escapeHtml(
+                    active.length ? active.length + ' scan(s) still active.' :
+                    stopped.length + ' scan(s) stopped and resumable.') + '</div>';
+            }
             if (reports.length === 0) {
-                h += '<p style="padding:12px;color:var(--text-muted);">No reports found.</p>';
+                h += '<p style="padding:12px;color:var(--text-muted);">No completed reports found.</p>';
             } else {
-                h += '<table><thead><tr><th>Scan ID</th><th>Type</th><th>Path</th><th>Started</th><th>Files</th><th>Hits</th><th>Actions</th></tr></thead><tbody>';
+                h += '<div class="table-scroll"><table><thead><tr><th>Scan ID</th><th>Path</th><th>Started</th><th>Completed</th><th>Duration</th><th>Files</th><th>Hits</th><th>Quarantined</th><th>Actions</th></tr></thead><tbody>';
                 for (var i = 0; i < reports.length; i++) {
                     var r = reports[i];
-                    h += '<tr><td><code>' + escapeHtml(r.scan_id || '-') + '</code></td><td>' + escapeHtml(r.type || '-') + '</td>';
+                    var hits = Number(r.total_hits);
+                    if (!Number.isFinite(hits)) hits = Array.isArray(r.hits) ? r.hits.length :
+                        (r.summary && Number(r.summary.total_hits)) || 0;
+                    var quarantined = Number(r.total_quarantined) || 0;
+                    var scanId = String(r.scan_id || '');
+                    h += '<tr><td><code>' + escapeHtml(scanId || '-') + '</code></td>';
                     h += '<td style="font-size:12px;">' + escapeHtml(r.path || '-') + '</td><td>' + fmtTime(r.started_epoch) + '</td>';
-                    h += '<td>' + (r.total_files || 0) + '</td><td>' + (r.total_hits || 0) + '</td>';
-                    h += '<td><button class="btn btn-primary btn-sm" data-action="report-details" data-id="' + escapeHtml(r.scan_id || '') + '">Exibir relatório</button> ';
-                    h += '<button class="btn btn-ghost btn-sm" data-action="scan-quarantine" data-id="' + escapeHtml(r.scan_id || '') + '">Quarantine</button> ';
-                    h += '<button class="btn btn-ghost btn-sm" data-action="scan-restore" data-id="' + escapeHtml(r.scan_id || '') + '">Restore</button></td></tr>';
+                    h += '<td>' + escapeHtml(r.completed || (r.completed_epoch ? fmtTime(r.completed_epoch) : '-')) + '</td>';
+                    h += '<td>' + fmtDuration(r.elapsed_seconds) + '</td><td>' + (Number(r.total_files) || 0) + '</td><td>' + hits + '</td><td>' + quarantined + '</td>';
+                    h += '<td><button class="btn btn-primary btn-sm" data-action="report-details" data-id="' + escapeHtml(scanId) + '">Exibir relatório</button> ';
+                    h += '<button class="btn btn-ghost btn-sm" data-action="scan-quarantine" data-id="' + escapeHtml(scanId) + '"' +
+                        (hits === 0 ? ' disabled title="No detections in this scan"' : '') + '>Quarantine</button> ';
+                    h += '<button class="btn btn-ghost btn-sm" data-action="scan-restore" data-id="' + escapeHtml(scanId) + '"' +
+                        (quarantined === 0 ? ' disabled title="No quarantined files from this scan"' : '') + '>Restore</button></td></tr>';
                 }
-                h += '</tbody></table>';
+                h += '</tbody></table></div>';
             }
             h += '</div>';
             return h;
@@ -823,31 +1056,40 @@
 
     function scanAction(id, action) {
         var button = null;
-        var stopButtons = document.querySelectorAll('[data-action="scan-stop"]');
-        for (var i = 0; i < stopButtons.length; i++) {
-            if (stopButtons[i].getAttribute('data-id') === id) {
-                button = stopButtons[i];
+        var actionButtons = document.querySelectorAll('[data-action="scan-' + action + '"]');
+        for (var i = 0; i < actionButtons.length; i++) {
+            if (actionButtons[i].getAttribute('data-id') === id) {
+                button = actionButtons[i];
                 break;
             }
         }
+        if ((action === 'quarantine' || action === 'restore') &&
+            !confirm((action === 'quarantine' ? 'Quarantine' : 'Restore') + ' all detected files from scan ' + id + '?')) {
+            return;
+        }
         if (button) {
             button.disabled = true;
-            button.textContent = action === 'stop' ? 'Stopping...' : 'Working...';
+            button.textContent = action === 'quarantine' ? 'Quarantining...' :
+                (action === 'restore' ? 'Restoring...' : (action === 'stop' ? 'Stopping...' : 'Working...'));
         }
         API.post('/scan/' + encodeURIComponent(id) + '/' + action, {}).then(function(r) {
             if (r.returncode !== undefined && r.returncode !== 0 && r.returncode !== 2) {
                 throw new Error(r.stderr || r.stdout || (action + ' failed'));
             }
-            toast(action + ' complete', 'success');
+            toast((action === 'quarantine' ? 'Files quarantined' :
+                (action === 'restore' ? 'Files restored' : action + ' complete')) + ' for scan ' + id, 'success');
             if (Router.currentPage === 'scan-management') {
                 refreshScanManagementView();
             }
+            else if (Router.currentPage === 'reports' &&
+                (action === 'quarantine' || action === 'restore')) Router.navigate('quarantine');
             else if (Router.currentPage === 'reports') Router.navigate('reports');
         }).catch(function(e) {
             toast('Error: ' + e.message, 'error');
             if (button) {
                 button.disabled = false;
-                button.textContent = 'Stop';
+                button.textContent = action === 'quarantine' ? 'Quarantine' :
+                    (action === 'restore' ? 'Restore' : 'Stop');
             }
         });
     }
@@ -859,8 +1101,13 @@
 
     // ----- Monitoring -----
     function renderMonitoring() {
-        return Promise.all([API.get('/system'), API.get('/monitor/users')]).then(function(results) {
-            var data = results[0], userData = results[1];
+        return Promise.all([
+            API.get('/system'), API.get('/monitor/users'),
+            // Web server detection is best-effort; never block the page.
+            API.get('/monitor/webserver').catch(function() { return {}; }),
+            API.get('/monitor/activity?lines=40').catch(function() { return {}; })
+        ]).then(function(results) {
+            var data = results[0], userData = results[1], ws = results[2] || {}, act = results[3] || {};
             var sys = data.system;
             var h = '<div class="monitor-grid">';
             h += '<div class="card monitor-status-card"><div class="card-header"><span class="card-title">' + tr('Real-time monitoring (inotify)') + '</span><span class="monitor-badge">' + tr('Inotify') + '</span></div>';
@@ -885,8 +1132,83 @@
                     escapeHtml(user.home) + ')</span></label>';
             });
             h += '</div><button class="btn btn-primary" data-action="monitor-save-users">' + tr('Save user selection') + '</button></div></div>';
+            // ---- Web server detection card (monitor public_html or not) ----
+            h += '<div class="card monitor-webserver-card"><div class="card-header"><span class="card-title">' + tr('Web server detection') + '</span><span class="monitor-badge">' + tr('public_html') + '</span></div>';
+            if (!ws || typeof ws.detected === 'undefined') {
+                h += '<p class="form-help">' + tr('Web server detection is unavailable.') + '</p>';
+            } else if (!ws.detected) {
+                h += '<p>' + tr('No running web server detected.') + '</p>';
+            } else {
+                h += '<div class="monitor-status-row"><span>' + tr('Detected web server:') + '</span><strong>' + escapeHtml(ws.servers.join(', ')) + '</strong></div>';
+                h += '<p>' + tr('Document roots detected:') + '</p><ul class="webserver-docroot-list">';
+                if (!(ws.docroots || []).length) {
+                    h += '<li class="form-help">' + tr('No document roots found in the server configuration.') + '</li>';
+                } else {
+                    ws.docroots.forEach(function(dr) {
+                        h += '<li>' + escapeHtml(dr) + '</li>';
+                    });
+                }
+                h += '</ul>';
+                h += '<label class="checkbox-row"><input type="checkbox" id="monitor-docroot-toggle"' +
+                    (ws.autodetect === '1' ? ' checked' : '') + '> ' +
+                    tr('Monitor detected document roots (e.g. public_html)') + '</label>';
+                h += '<p class="form-help">' + tr('Changes take effect after Reload or restarting the monitor.') + '</p>';
+                h += '<button class="btn btn-primary" data-action="monitor-save-webserver">' + tr('Save') + '</button>';
+            }
+            h += '</div></div>';
+            // ---- Monitor activity card (real-time scanned/changed files) ----
+            h += '<div class="card monitor-activity-card"><div class="card-header"><span class="card-title">' + tr('Monitor activity') + '</span>' +
+                '<span class="monitor-badge">' + (act.running ? tr('Live') : tr('STOPPED')) + '</span></div>';
+            h += '<p class="form-help">' + tr('Files detected by inotify (create/move/modify) in real time, newest first. These are queued for the monitor scan batches.') + '</p>';
+            h += '<div class="monitor-activity-list" id="monitor-activity-body">' + renderMonitorActivityList(act) + '</div>';
+            h += '</div></div>';
             return h;
         });
+    }
+
+    function renderMonitorActivityList(act) {
+        var entries = act && act.entries || [];
+        if (!entries.length) {
+            if (act && act.running) {
+                return '<p class="form-help">' + tr('No monitored file activity yet. New, moved or modified files will appear here as the monitor detects them.') + '</p>';
+            }
+            return '<p class="form-help">' + tr('Monitor is stopped — no live activity. Start the monitor to watch files in real time.') + '</p>';
+        }
+        var rows = '';
+        entries.forEach(function(entry) {
+            var ev = entry.event || '-';
+            var evClass = ev.indexOf('CREATE') !== -1 ? 'ev-create' :
+                (ev.indexOf('MOVE') !== -1 ? 'ev-move' : 'ev-modify');
+            rows += '<div class="monitor-activity-row"><span class="monitor-activity-event ' + evClass + '">' +
+                escapeHtml(ev) + '</span><span class="monitor-activity-file" title="' +
+                escapeHtml(entry.file) + '">' + escapeHtml(entry.file) + '</span>' +
+                (entry.time ? '<span class="monitor-activity-time">' + escapeHtml(entry.time) + '</span>' : '') +
+                '</div>';
+        });
+        if (act.total_events !== undefined && act.total_events !== null) {
+            rows += '<div class="monitor-activity-total form-help">' + escapeHtml(String(act.total_events)) + ' ' + tr('events logged') + '</div>';
+        }
+        return rows;
+    }
+
+    var _monitorActivityTimer = null;
+    function startMonitorActivityRefresh() {
+        stopMonitorActivityRefresh();
+        _monitorActivityTimer = setInterval(function() {
+            if (Router.currentPage !== 'monitoring') { stopMonitorActivityRefresh(); return; }
+            var body = document.getElementById('monitor-activity-body');
+            if (!body) return;
+            API.get('/monitor/activity?lines=40').then(function(act) {
+                var el = document.getElementById('monitor-activity-body');
+                if (el) el.innerHTML = renderMonitorActivityList(act);
+            }).catch(function() { /* best-effort */ });
+        }, 3000);
+    }
+    function stopMonitorActivityRefresh() {
+        if (_monitorActivityTimer) {
+            clearInterval(_monitorActivityTimer);
+            _monitorActivityTimer = null;
+        }
     }
 
     function clearMonitorPollers() {
@@ -952,6 +1274,13 @@
             toast((data && data.message) || 'User selection saved; reload the monitor', 'success');
         }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
     }
+    function saveMonitorWebserver() {
+        var toggle = document.getElementById('monitor-docroot-toggle');
+        if (!toggle) return;
+        API.post('/monitor/webserver', { enabled: !!toggle.checked }).then(function(data) {
+            toast((data && data.message) || 'Web server monitoring updated', 'success');
+        }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
+    }
     function pollMonitorStarted() {
         // Poll system status until the monitor is fully up (max ~90s).
         var tries = 0;
@@ -1008,24 +1337,85 @@
     }
 
     // ----- Updates -----
+    var _lastUpdateDetails = null;
+
     function renderUpdates() {
         return API.get('/system').then(function(data) {
             var sys = data.system;
             var h = '<div class="card"><div class="card-header"><span class="card-title">Updates</span></div><table>';
             h += '<tr><td>LMD Version</td><td>' + escapeHtml(sys.version || 'unknown') + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-ver">Update</button> <button class="btn btn-warning btn-sm" data-action="update-ver-beta">Beta</button></td></tr>';
+            h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || 'unknown') + ' (' + escapeHtml(sys.clamav_status || 'missing') + ')</td>';
+            h += '<td><button class="btn btn-primary btn-sm" data-action="update-clamav">Update ClamAV</button></td></tr>';
             h += '<tr><td>Signatures</td><td>' + escapeHtml(sys.signature_version || 'unknown') + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-sigs">Update Sigs</button></td></tr>';
             h += '</table></div>';
+            h += '<div class="card"><div class="card-header"><span class="card-title">Installer location</span></div>';
+            h += '<p><strong>Installation directory:</strong> <code>' +
+                escapeHtml(sys.base_dir || 'unknown') + '</code></p>';
+            h += '<p><strong>Installer directory:</strong> <code>' +
+                escapeHtml(sys.installer_directory || 'Not available in the installed runtime') + '</code></p>';
+            if (sys.installer_path) {
+                h += '<p><strong>Installer:</strong> <code>' + escapeHtml(sys.installer_path) + '</code></p>';
+            }
+            h += '</div>';
+            if (_lastUpdateDetails) {
+                var d = _lastUpdateDetails;
+                var output = (d.stdout || '') + (d.stderr ? '\n' + d.stderr : '');
+                h += '<div class="card"><div class="card-header"><span class="card-title">Update details</span></div>';
+                var status = d.status || (d.returncode === 0 ? 'completed' : 'failed');
+                var statusColor = status === 'completed' ? 'var(--success)' : 'var(--danger)';
+                h += '<p><strong>Status:</strong> <span style="color:' + statusColor + ';">' +
+                    escapeHtml(status) + '</span></p>';
+                h += '<p><strong>Operation:</strong> ' + escapeHtml(d.operation || 'Update') + '</p>';
+                h += '<p>Before: <code>' + escapeHtml(updateValue(d.before)) + '</code> &nbsp; After: <code>' +
+                    escapeHtml(updateValue(d.after)) + '</code> &nbsp; Changed: <strong>' +
+                    (d.changed ? 'yes' : 'no') + '</strong></p>';
+                h += '<details><summary>Command output</summary><pre class="report-json">' +
+                    escapeHtml(output || 'No output returned by maldet.') + '</pre></details></div>';
+            }
             return h;
         });
     }
 
+    function updateValue(value) {
+        if (!value) return 'unknown';
+        var keys = Object.keys(value);
+        return keys.length ? String(value[keys[0]]) : 'unknown';
+    }
+
     function updateVer(beta) {
-        API.post('/update/version', { beta: beta }).then(function() { toast('Update complete', 'success'); });
+        API.post('/update/version', { beta: beta }).then(function(data) {
+            _lastUpdateDetails = data;
+            toast(data.changed ? 'Update complete: version changed' : 'Update complete: already current', 'success');
+            Router.navigate('updates');
+        }).catch(function(err) {
+            if (err.data) _lastUpdateDetails = err.data;
+            toast('Update failed: ' + err.message, 'error');
+            Router.navigate('updates');
+        });
     }
     function updateSigs() {
-        API.post('/update/sigs', {}).then(function() { toast('Signatures updated', 'success'); });
+        API.post('/update/sigs', {}).then(function(data) {
+            _lastUpdateDetails = data;
+            toast(data.changed ? 'Signatures updated' : 'Signatures already current', 'success');
+            Router.navigate('updates');
+        }).catch(function(err) {
+            if (err.data) _lastUpdateDetails = err.data;
+            toast('Signature update failed: ' + err.message, 'error');
+            Router.navigate('updates');
+        });
+    }
+    function updateClamAv() {
+        API.post('/update/clamav', {}).then(function(data) {
+            _lastUpdateDetails = data;
+            toast(data.changed ? 'ClamAV updated' : 'ClamAV already current', 'success');
+            Router.navigate('updates');
+        }).catch(function(err) {
+            if (err.data) _lastUpdateDetails = err.data;
+            toast('ClamAV update failed: ' + err.message, 'error');
+            Router.navigate('updates');
+        });
     }
 
     // ----- Config -----
@@ -1061,13 +1451,6 @@
                 h += '</div></div>';
             });
             h += '<div class="config-actions"><button class="btn btn-success" id="save-config-btn" data-action="save-config">Save Changes</button></div></div>';
-            h += '<div class="card config-section"><div class="config-section-title">Security</div>' +
-                '<p class="form-help">Change the password used to access the WebGUI.</p>' +
-                '<div class="config-password-grid">' +
-                '<div class="form-group"><label class="form-label" for="current-password">Current password</label><input id="current-password" class="form-input" type="password" autocomplete="current-password"></div>' +
-                '<div class="form-group"><label class="form-label" for="new-password">New password</label><input id="new-password" class="form-input" type="password" minlength="8" autocomplete="new-password"></div>' +
-                '<div class="form-group"><label class="form-label" for="confirm-password">Confirm new password</label><input id="confirm-password" class="form-input" type="password" minlength="8" autocomplete="new-password"></div>' +
-                '</div><div class="config-actions"><button class="btn btn-primary" data-action="change-password">Change Password</button></div></div>';
             return h;
         });
     }
@@ -1101,6 +1484,66 @@
         }).then(function() {
             if (button) button.disabled = false;
         });
+    }
+
+    function securityChangePassword() {
+        var msg = document.getElementById('security-message');
+        var current = document.getElementById('sec-current-password');
+        var next = document.getElementById('sec-new-password');
+        var confirm = document.getElementById('sec-confirm-password');
+        if (!current || !next || !confirm) {
+            changePassword();
+            return;
+        }
+        if (!current.value || !next.value || !confirm.value) {
+            if (msg) msg.textContent = 'Please fill in all password fields.';
+            toast('Please fill in all password fields.', 'error');
+            return;
+        }
+        if (next.value.length < 8) {
+            if (msg) msg.textContent = 'New password must contain at least 8 characters.';
+            toast('New password must contain at least 8 characters.', 'error');
+            return;
+        }
+        if (next.value !== confirm.value) {
+            if (msg) msg.textContent = 'New passwords do not match.';
+            toast('New passwords do not match.', 'error');
+            return;
+        }
+        var button = document.querySelector('[data-action="security-change-password"]');
+        if (button) button.disabled = true;
+        API.post('/auth/change', {
+            current_password: current.value,
+            new_password: next.value,
+            confirm_password: confirm.value
+        }).then(function() {
+            if (msg) msg.textContent = 'Password changed successfully.';
+            toast('Password changed successfully.', 'success');
+            current.value = '';
+            next.value = '';
+            confirm.value = '';
+            if (button) button.disabled = false;
+        }).catch(function(err) {
+            if (msg) msg.textContent = 'Password change failed: ' + err.message;
+            if (button) button.disabled = false;
+        });
+    }
+
+    function renderSecurityPage() {
+        var h = '<div class="security-page"><div class="card config-section"><div class="config-section-title">' + escapeHtml(tr('Security')) + '</div>' +
+            '<p class="form-help">' + escapeHtml(tr('Change the WebGUI password. Password must contain at least 8 characters.')) + '</p>' +
+            '<div class="config-password-grid">' +
+            '<div class="form-group"><label class="form-label" for="sec-current-password">' + escapeHtml(tr('Current password')) + '</label>' +
+            '<input id="sec-current-password" class="form-input" type="password" autocomplete="current-password"></div>' +
+            '<div class="form-group"><label class="form-label" for="sec-new-password">' + escapeHtml(tr('New password')) + '</label>' +
+            '<input id="sec-new-password" class="form-input" type="password" minlength="8" autocomplete="new-password"></div>' +
+            '<div class="form-group"><label class="form-label" for="sec-confirm-password">' + escapeHtml(tr('Confirm password')) + '</label>' +
+            '<input id="sec-confirm-password" class="form-input" type="password" minlength="8" autocomplete="new-password"></div>' +
+            '</div>' +
+            '<p id="security-message" class="security-message"></p>' +
+            '<div class="config-actions"><button class="btn btn-primary" data-action="security-change-password">' + escapeHtml(tr('Change password')) + '</button></div>' +
+            '</div></div>';
+        return Promise.resolve(h);
     }
 
     function saveConfig() {
@@ -1263,6 +1706,7 @@
     Router.register('reports', renderReports);
     Router.register('monitoring', renderMonitoring);
     Router.register('updates', renderUpdates);
+    Router.register('security', renderSecurityPage);
     Router.register('config', renderConfig);
     Router.register('alerts', renderAlerts);
     Router.register('logs', renderLogs);

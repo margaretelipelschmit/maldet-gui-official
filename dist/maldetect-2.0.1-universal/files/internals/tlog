@@ -13,7 +13,7 @@ export PATH
 TLOG_VERSION="2.0.6"
 
 # BASERUN: cursor storage directory — sed-replaced at install time
-BASERUN="${BASERUN:-/tmp}"
+BASERUN="${BASERUN:-/usr/local/maldetect/tmp}"
 
 # Help and version functions (pre-source — no library dependency)
 _tlog_version_banner() {

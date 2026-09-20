@@ -239,7 +239,7 @@ _build_co_allowed_pattern() {
 	_pat="${_pat}|quarantine_hits|quarantine_clean|quarantine_on_error"
 	_pat="${_pat}|quarantine_suspend_user|quarantine_suspend_user_minuid"
 	_pat="${_pat}|default_monitor_mode|inotify_base_watches|inotify_sleep|inotify_reloadtime"
-	_pat="${_pat}|inotify_minuid|inotify_docroot|inotify_cpunice|inotify_ionice"
+	_pat="${_pat}|inotify_minuid|inotify_docroot|inotify_docroot_autodetect|inotify_cpunice|inotify_ionice"
 	_pat="${_pat}|inotify_cpulimit"
 	_pat="${_pat}|digest_interval|digest_escalate_hits|cron_digest_hook|monitor_paths_extra|monitor_disabled_users"
 	_pat="${_pat}|monitor_scan_owner_filters"

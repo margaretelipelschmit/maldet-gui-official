@@ -1,3 +1,79 @@
+v2.0.2 | May 12 2026:
+
+  -- New Features --
+
+[New] hookscan: audit-trail coverage for pre-scan validation decisions —
+      filename rejection (non_printable, metachar, traversal, relative_path),
+      homedir-restriction violation, scan timeout, and scan error now emit
+      pattern_matched/error_occurred/hook_timeout/hook_failed events to
+      audit.log with mode= and reason= extras (filename validation reordered
+      to run after elog_lib sourcing so rejection events reach audit.log);
+      closes G-04 single-file path from
+      docs/specs/2026-03-24-audit-log-coverage-assessment.md
+[New] hookscan: BATS coverage for ftp mode (pure-ftpd CallUploadScript)
+      including UPLOAD_VUSER env-var auto-detect and explicit-ftp-overrides;
+      ftp mode is logger-only on stdout (fire-and-forget per pure-uploadscript
+      contract); docs/specs/2026-03-23-hookscan-improvement-proposal.md §3b
+[New] monitor: inotify_docroot_autodetect config option (default 0 = disabled)
+      plus `maldet --webserver-detect` CLI — detects the running web server
+      (Apache/httpd, nginx, LiteSpeed/OpenLiteSpeed, lighttpd, caddy) and its
+      document root(s) from the server configuration; when enabled, detected
+      document roots are added to the `users`-mode inotify watch list
+      (additive to inotify_docroot, nothing replaced)
+[New] gui: Monitoring page now surfaces web server detection — new card runs
+      `maldet --webserver-detect` via GET /api/monitor/webserver, shows the
+      detected server (Apache/httpd, nginx, LiteSpeed, lighttpd, caddy) and
+      its document root(s) (e.g. public_html), with a toggle to monitor them
+      or not (POST persists inotify_docroot_autodetect in conf.maldet)
+[New] gui: per-file quarantine actions Clean and Delete — Clean reuses maldet's
+      native cleaner via a temporary TSV hit list (`maldet -n <sid>` with
+      quarantine_clean/quarantine_hits overrides); Delete permanently removes
+      the quarantined file and its .info metadata; fixes quarantine.hist
+      parsing for the batch-era 12-field format (signature column previously
+      showed the owner field from the .info file)
+[New] gui: Monitoring page real-time activity card — new GET
+      /api/monitor/activity tails the monitor's inotify_log
+      (inotifywait "%w%f %e %T" lines, paths with spaces handled) and the
+      card auto-refreshes every 3s (newest first, event-type coloring,
+      timer stopped on page leave); entries are the create/move/modify
+      events queued for the monitor's scan batches
+
+  -- Changes --
+
+[Change] release: version bump 2.0.1 -> 2.0.2
+[Change] ignore_inotify.defaults: add Dovecot doveconf tempfiles
+         (/tmp/doveconf., /var/tmp/doveconf.) — Plesk mail subsystem; issue #488
+[Change] pkg_lib (vendored): re-sync from canonical 1.0.10 -> 1.0.11; brings
+         pkg_fhs_verify_farm [[ -O "$manifest_path" ]] ownership guard that
+         was missed in the v2.0.1-era sync due to same-version 1.0.10 drift
+         (canonical security fix 6135a01 shipped under the same PKG_LIB_VERSION
+         as the earlier comment-discipline commit cdd0814); closes the
+         attacker-writable manifest vector against root-startup invocation
+         of pkg_fhs_verify_farm from files/maldet:78
+[Change] coreutils: `command cat` prefix on 26 bare `cat` sites across 9
+         files (lmd_alert, lmd_config, lmd_engine, lmd_monitor, lmd_quarantine,
+         lmd_scan, lmd_session, lmd_sigs, lmd_update, files/maldet, install.sh)
+         — el6 PATH portability per project Shell Standards; closes the
+         advisory item carried in MEMORY since 2026-04-06. Heredoc form
+         (`cat<<EOF`) and vendored libraries (alert_lib, tlog_lib) unchanged
+
+  -- Bug Fixes --
+
+[Fix] quarantine: symlink TOCTOU guards across scan-to-quarantine
+      (_batch_quarantine pre-filter + per-file, _quarantine_file, quar_hitlist
+      callers), restore (_validate_restore_path), and clean-failure
+      re-quarantine (clean); SECURITY-FINDINGS P2-1 + P3-6 deferred from 2.0.1
+[Fix] alert: telegram delivery failed on MarkdownV2 reserved characters in
+      substituted token values; wired escape_mode + skip_tokens in
+      _alert_tpl_render (vendored alert_lib 1.0.7 -> 1.0.8) and mirrored in
+      _lmd_render_entries; affects --test-alert {scan,digest} telegram and
+      real telegram alerts; issue #487
+[Fix] monitor digest: header leak via tlog cursor-shrink path on session
+      rotation inflated tot_hits, producing badge/stat block count
+      mismatch (e.g., "1 threat(s)" badge vs "0 Threats" stat) and bogus
+      empty-body digest emails; _genalert_digest filters ^# and empty $1
+      at both monitor and hook-merge counter sites; issue #491
+
 v2.0.1 | Mar 25 2026:
 
   -- New Features --
@@ -24,7 +100,10 @@ v2.0.1 | Mar 25 2026:
       compiled rules via yarac, --scan-list batch scanning; issue #392, #277, #239
 [New] Email alerts reimagined: HTML+text dual-format with template engine ({{TOKEN}}
       placeholders); SMTP relay support (smtp_relay, smtp_from, smtp_user, smtp_pass);
-       embed templates; on-demand HTML rendering from session data
+      email_format config (text/html/both); Slack Block Kit, Telegram MarkdownV2,
+      Discord embed templates; on-demand HTML rendering from session data
+[New] Discord alerting: discord_alert and discord_webhook_url config; scan reports
+      uploaded via Discord webhook multipart upload
 [New] Shared library integrations: alert_lib, elog_lib (structured event logging with
       audit trail), tlog_lib (incremental log tracking), pkg_lib (packaging primitives)
 [New] ClamAV signature validation gate: clamscan -d validates sig files before
@@ -41,6 +120,7 @@ v2.0.1 | Mar 25 2026:
 [New] Hook escalation: immediate alert on hit threshold; deduplicated with digest
 [New] Hook digest and reporting: --digest on-demand alerts; --report hooks with
       time/mode filters
+[New] --test-alert {scan|digest} {email|slack|telegram|discord}: send test alert with
       synthetic data through the real rendering pipeline; channel isolation; root-only gate
 [New] Audit log: 7 event types (purge, update, alert_failed, hookscan source/rate metadata)
 [New] importconf: config migration extracted from install.sh for shared use
@@ -334,6 +414,7 @@ v2.0.1 | Mar 25 2026:
       concurrent scan conflicts
 [Fix] scan(): exit 1 when all provided scan paths do not exist
 [Fix] Hash scanning: handle md5sum/sha256sum backslash-escaped filenames
+[Fix] Alerting: Slack migrated from deprecated files.upload API; Telegram /bot prefix;
       token security via curl -K; genalert() state isolation; issue #387, #458, #461, #426
 [Fix] Security: _safe_source_conf() allowlist (79 vars); conf.maldet 0640; dirs 750;
       remote config RCE prevention; semver validation prevents directory traversal;
@@ -411,6 +492,7 @@ v1.6.5 | Mar 27 2023:
 
 v1.6.4 | Mar 18 2019:
 [New] add quarantine_on_error variable to control quarantine behavior when scanner engines such as ClamAV encounter an error
+[New] add support for slack alerts; pr #240 mostafahussein
 [New] add ability to disable cron via conf.maldet; issue #260 / pr #300 , #304 sporks5000
 [New] add cleaner rule for php.malware.magentocore_ccskim and an alias of as php_malware_hexinject for associated yara rule
 [Change] update cron.daily for ispmanager5; pr #305 yogsottot

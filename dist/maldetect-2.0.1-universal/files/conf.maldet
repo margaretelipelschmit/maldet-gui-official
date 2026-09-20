@@ -72,15 +72,15 @@ smtp_pass=""
 
 # Enable or disable telegram alerts
 # [0 = disabled, 1 = enabled]
-telegram_alert="0"
+telegram_alert="1"
 
 # Telegram bot token.
 # more information https://core.telegram.org/bots
-telegram_bot_token="TELEGRAM_BOT_TOKEN"
+telegram_bot_token="8862085739:AAHgc0PSfAh82oKR2LOrGvsrqaFG7VzQAUg"
 
 # Telegram channel id
 # more information https://stackoverflow.com/questions/33858927/how-to-obtain-the-chat-id-of-a-private-telegram-channel?answertab=active#tab-top
-telegram_channel_id="TELEGRAM_CHANNEL_ID"
+telegram_channel_id="8936481505"
 
 # This controls the daily automatic updates of LMD signature files
 # and cleaner rules. The signature update process preserves any
@@ -377,6 +377,15 @@ inotify_minuid="500"
 # this option is set, users will only have the webdir monitored
 # [ comma spaced list, clear option to default monitor user homedir ]
 inotify_docroot="public_html,public_ftp"
+
+# Auto-detect the running web server (Apache/httpd, nginx, LiteSpeed/
+# OpenLiteSpeed, lighttpd, caddy) and its document root(s), then add the
+# detected document roots to the inotify watch list in `users` mode.
+# Detected paths are added IN ADDITION TO the inotify_docroot subdirectories
+# above (nothing is replaced). Use `maldet --webserver-detect` to preview
+# which web server and document roots are detected on this host.
+# [ 0 = disabled (default), 1 = enabled ]
+inotify_docroot_autodetect="1"
 
 # Process CPU scheduling (nice) priority level for inotify monitor operations.
 # [ -19 = high prio , 19 = low prio, default = 18 ]

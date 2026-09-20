@@ -126,6 +126,216 @@ _monitor_append_extra_paths() {
 	done < "$_extra_file"
 }
 
+# ── Web server / document root detection ──────────────────────────────────────
+# Backs the inotify_docroot_autodetect option (monitor mode) and the
+# `maldet --webserver-detect` diagnostic command. Detection is process-based
+# (pgrep); document roots are read from the server's own configuration.
+
+_monitor_ws_unquote() {
+	# Strip one pair of surrounding single/double quotes (stdin -> stdout).
+	sed "s/^['\"]//; s/['\"]\$//"
+}
+
+_monitor_webserver_running() {
+	# $1=canonical server key (apache|nginx|litespeed|lighttpd|caddy)
+	# Returns 0 when a matching process is running, else 1.
+	local _ws="$1" _p _bins
+	case "$_ws" in
+		apache)    _bins="httpd apache2" ;;
+		nginx)     _bins="nginx" ;;
+		litespeed) _bins="litespeed lshttpd openlitespeed" ;;
+		lighttpd)  _bins="lighttpd" ;;
+		caddy)     _bins="caddy" ;;
+		*)         return 1 ;;
+	esac
+	for _p in $_bins; do
+		if pgrep -x "$_p" >/dev/null 2>&1; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+_monitor_detect_webserver() {
+	# Print the canonical name of each running web server, one per line.
+	# Order: most common shared-hosting stacks first.
+	local _ws
+	for _ws in apache nginx litespeed lighttpd caddy; do
+		if _monitor_webserver_running "$_ws"; then
+			printf '%s\n' "$_ws"
+		fi
+	done
+}
+
+_monitor_webserver_conf_files() {
+	# $1=canonical server key, $2=filesystem root prefix (default "/")
+	# Print candidate configuration files (existing only), one per line.
+	local _ws="$1" _root="${2:-/}" _f
+	case "$_root" in
+		*/) ;;
+		*) _root="${_root}/" ;;
+	esac
+	case "$_ws" in
+		apache)
+			for _f in \
+				"${_root}etc/apache2/apache2.conf" \
+				"${_root}etc/apache2/httpd.conf" \
+				"${_root}etc/httpd/conf/httpd.conf" \
+				"${_root}usr/local/apache/conf/httpd.conf" \
+				"${_root}usr/local/apache/conf/extra/httpd-vhosts.conf"; do
+				[ -f "$_f" ] && printf '%s\n' "$_f"
+			done
+			for _f in \
+				"${_root}etc/apache2/conf.d" \
+				"${_root}etc/apache2/sites-enabled" \
+				"${_root}etc/httpd/conf.d" \
+				"${_root}usr/local/apache/conf.d"; do
+				[ -d "$_f" ] && find "$_f" -maxdepth 1 -type f 2>/dev/null
+			done
+			;;
+		nginx)
+			for _f in \
+				"${_root}etc/nginx/nginx.conf" \
+				"${_root}usr/local/nginx/conf/nginx.conf"; do
+				[ -f "$_f" ] && printf '%s\n' "$_f"
+			done
+			for _f in \
+				"${_root}etc/nginx/conf.d" \
+				"${_root}etc/nginx/sites-enabled" \
+				"${_root}usr/local/nginx/conf/conf.d"; do
+				[ -d "$_f" ] && find "$_f" -maxdepth 1 -type f 2>/dev/null
+			done
+			;;
+		litespeed)
+			_f="${_root}usr/local/lsws/conf/httpd_config.conf"
+			[ -f "$_f" ] && printf '%s\n' "$_f"
+			_f="${_root}usr/local/lsws/conf/vhosts"
+			[ -d "$_f" ] && find "$_f" -maxdepth 2 -type f -name '*.conf' 2>/dev/null
+			;;
+		lighttpd)
+			_f="${_root}etc/lighttpd/lighttpd.conf"
+			[ -f "$_f" ] && printf '%s\n' "$_f"
+			for _f in \
+				"${_root}etc/lighttpd/conf.d" \
+				"${_root}etc/lighttpd/conf-enabled"; do
+				[ -d "$_f" ] && find "$_f" -maxdepth 1 -type f 2>/dev/null
+			done
+			;;
+		caddy)
+			for _f in "${_root}etc/caddy/Caddyfile" "${_root}etc/caddy/Caddyfile.d"; do
+				if [ -f "$_f" ]; then
+					printf '%s\n' "$_f"
+				elif [ -d "$_f" ]; then
+					find "$_f" -maxdepth 1 -type f 2>/dev/null
+				fi
+			done
+			;;
+	esac
+}
+
+_monitor_webserver_docroots() {
+	# $1=canonical server key, $2=filesystem root prefix (default "/")
+	# Print raw document root values advertised by the server configuration.
+	local _ws="$1" _root="${2:-/}" _f
+	case "$_root" in
+		*/) ;;
+		*) _root="${_root}/" ;;
+	esac
+	while IFS= read -r _f; do
+		[ -n "$_f" ] || continue
+		case "$_ws" in
+			apache)
+				grep -hoE '^[[:space:]]*DocumentRoot[[:space:]]+[^[:space:]]+' "$_f" 2>/dev/null | \
+					awk '{print $2}' | _monitor_ws_unquote
+				;;
+			nginx)
+				grep -hoE '^[[:space:]]*root[[:space:]]+[^;]+;' "$_f" 2>/dev/null | \
+					sed -E 's/^[[:space:]]*root[[:space:]]+//; s/;[[:space:]]*$//' | \
+					awk '{print $1}' | _monitor_ws_unquote
+				;;
+			litespeed)
+				grep -hoiE '^[[:space:]]*docRoot[[:space:]]+[^[:space:]]+' "$_f" 2>/dev/null | \
+					awk '{print $2}' | _monitor_ws_unquote
+				;;
+			lighttpd)
+				grep -hoE '^[[:space:]]*server\.document-root[[:space:]]*=[[:space:]]*[^[:space:]]+' "$_f" 2>/dev/null | \
+					sed -E 's/.*=[[:space:]]*//' | _monitor_ws_unquote
+				;;
+			caddy)
+				grep -hoE '^[[:space:]]*root[[:space:]]+([^[:space:]]+[[:space:]]+)?[^[:space:]]+' "$_f" 2>/dev/null | \
+					awk '{print $NF}' | _monitor_ws_unquote
+				;;
+		esac
+	done < <(_monitor_webserver_conf_files "$_ws" "$_root")
+}
+
+_monitor_collect_webserver_docroots() {
+	# $1=canonical server key, $2=filesystem root prefix (default "/")
+	# Print existing absolute document root directories (deduped).
+	# Relative roots, unresolved variables and globs are skipped.
+	local _ws="$1" _root="${2:-/}" _dr _abs
+	case "$_root" in
+		*/) ;;
+		*) _root="${_root}/" ;;
+	esac
+	_monitor_webserver_docroots "$_ws" "$_root" | while IFS= read -r _dr; do
+		[ -n "$_dr" ] || continue
+		case "$_dr" in
+			/*) ;;
+			*) continue ;;
+		esac
+		case "$_dr" in
+			*'$'*|*'*'*) continue ;;
+		esac
+		# Normalize trailing slash (except filesystem root)
+		if [ "${#_dr}" -gt 1 ]; then
+			_dr="${_dr%/}"
+		fi
+		_abs="${_root%/}${_dr}"
+		[ -d "$_abs" ] || continue
+		printf '%s\n' "$_dr"
+	done | awk '!seen[$0]++'
+}
+
+webserver_detect_report() {
+	# `maldet --webserver-detect`: report the running web server(s) and their
+	# document root(s), plus the inotify_docroot_autodetect state.
+	# Returns 0 when a web server was detected, 1 when none was found.
+	local _ws _drs _dr _detected=0 _count
+	while IFS= read -r _ws; do
+		[ -n "$_ws" ] || continue
+		_detected=1
+		echo "web server detected: $_ws"
+		_drs=$(_monitor_collect_webserver_docroots "$_ws" "")
+		_count=0
+		while IFS= read -r _dr; do
+			[ -n "$_dr" ] || continue
+			if [ "$_count" -eq 0 ]; then
+				echo "document roots:"
+			fi
+			_count=$((_count + 1))
+			echo "  $_dr"
+		done <<< "$_drs"
+		if [ "$_count" -eq 0 ]; then
+			echo "document roots: none found in server configuration"
+		fi
+	done < <(_monitor_detect_webserver)
+
+	if [ "$_detected" -eq 0 ]; then
+		echo "web server detected: none"
+	fi
+	echo ""
+	echo "inotify_docroot_autodetect=\"${inotify_docroot_autodetect:-0}\""
+	if [ "${inotify_docroot_autodetect:-0}" = "1" ]; then
+		echo 'detected document roots are added to `maldet --monitor users`'
+	else
+		echo 'hint: set inotify_docroot_autodetect="1" in conf.maldet to monitor detected document roots'
+	fi
+	if [ "$_detected" -eq 1 ]; then
+		return 0
+	fi
+	return 1
+}
 _monitor_load_ignore_inotify_union() {
 	# Union user ignore_inotify + ignore_inotify.defaults. Emit prefixed
 	# tuples ("u:<entry>" / "d:<entry>") for downstream semantic dispatch.
@@ -590,6 +800,26 @@ monitor_init() {
 				fi
 			fi
 		done < <(cut -d':' -f1,3,6 /etc/passwd | sort)
+
+		# Optional: add detected web server document roots (opt-in, additive).
+		# See inotify_docroot_autodetect in conf.maldet.
+		if [ "${inotify_docroot_autodetect:-0}" = "1" ]; then
+			local _ws_detected=0 _ws _ws_dr
+			while IFS= read -r _ws; do
+				[ -n "$_ws" ] || continue
+				_ws_detected=1
+				eout "{mon} detected web server: $_ws" 1
+				while IFS= read -r _ws_dr; do
+					[ -n "$_ws_dr" ] || continue
+					grep -Fqx -- "$_ws_dr" "$_inotify_fpaths" && continue
+					echo "$_ws_dr" >> "$_inotify_fpaths"
+					eout "{mon} added $_ws_dr to inotify monitoring array (web server: $_ws)" 1
+				done < <(_monitor_collect_webserver_docroots "$_ws" "")
+			done < <(_monitor_detect_webserver)
+			if [ "$_ws_detected" = "0" ]; then
+				eout "{mon} no running web server detected (inotify_docroot_autodetect=1)" 1
+			fi
+		fi
 
 		if [ -d "/dev/shm" ]; then
 			echo "/dev/shm" >> "$_inotify_fpaths"

@@ -159,6 +159,8 @@ lmdup() {
 		if [ "$upstreamver" -gt "$installedver" ]; then
 			eout "{update} new version $upstreamver_readable found, updating..." 1
 			doupdate=1
+		elif [ "$upstreamver" -lt "$installedver" ]; then
+			eout "{update} installed version $lmd_version is newer than upstream $upstreamver_readable; no update required." 1
 		elif [ "$lmdup_force" ]; then
 			eout "{update} version update with --force requested, updating..." 1
 			doupdate=1
@@ -176,6 +178,17 @@ lmdup() {
 			$_hash_bin "$inspath/maldet" "$intfunc" | awk '{print$1}' | tr '\n' ' ' | tr -d ' ' > "$lmd_hash_file"
 			get_remote_file "$_hash_remote_url" "update" "1"
 			upstreamhash="$return_file"
+			# Some release channels publish only the legacy MD5 sidecar.  If
+			# the preferred SHA-256 sidecar is unavailable, retry with MD5
+			# rather than treating a valid channel as broken.
+			if [ ! -s "$upstreamhash" ] && [ "$_hash_bin" = "$sha256sum" ] && [ -n "$md5sum" ]; then
+				eout "{update} SHA-256 hash file unavailable, falling back to MD5 verification" 1
+				_hash_bin="$md5sum"
+				_hash_remote_url="$lmd_hash_url"
+				$_hash_bin "$inspath/maldet" "$intfunc" | awk '{print$1}' | tr '\n' ' ' | tr -d ' ' > "$lmd_hash_file"
+				get_remote_file "$_hash_remote_url" "update" "1"
+				upstreamhash="$return_file"
+			fi
 			if [ -s "$upstreamhash" ]; then
 				installed_hash=$(cat "$lmd_hash_file")
 				current_hash=$(cat "$upstreamhash")

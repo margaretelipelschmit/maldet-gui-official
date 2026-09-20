@@ -24,6 +24,7 @@ import platform
 import pwd
 import hashlib
 import secrets
+import tempfile
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -38,7 +39,7 @@ CONF_FILE = "conf.maldet"
 LOG_DIR = "/var/log/maldet"
 EVENT_LOG = "event_log"
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8080
+DEFAULT_PORT = 32501
 
 MIME_TYPES = {
     ".html": "text/html", ".css": "text/css", ".js": "application/javascript",
@@ -54,6 +55,9 @@ TEMPLATE_DIR = os.path.join(SCRIPT_DIR, "templates")
 AUTH_FILE = "gui.auth"
 AUTH_SESSIONS = {}
 AUTH_LOCK = threading.Lock()
+SCAN_START_LOCK = threading.Lock()
+SCAN_START_RESERVATIONS = {}
+SCAN_START_RESERVATION_TTL = 30.0
 
 
 # ---------------------------------------------------------------------------
@@ -171,8 +175,192 @@ def run_maldet(args, timeout=30, capture=True):
 # Utility: system info
 # ---------------------------------------------------------------------------
 
+def get_clamav_version():
+    """Return the installed ClamAV scanner version, if available."""
+    for command in ("clamscan", "clamdscan"):
+        path = find_system_command(command)
+        if not path:
+            continue
+        try:
+            result = subprocess.run(
+                [path, "--version"], capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            output = (result.stdout or result.stderr or "").strip()
+            if output:
+                return output.splitlines()[0]
+    return "unknown"
+
+
+def find_system_command(command):
+    """Resolve a system command even when the service has a minimal PATH."""
+    path = shutil.which(command)
+    if path:
+        return path
+    for directory in ("/usr/bin", "/usr/sbin", "/bin", "/sbin"):
+        candidate = os.path.join(directory, command)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return ""
+
+
+def get_clamav_status():
+    """Return a stable status for the ClamAV scanner used by the GUI."""
+    version = get_clamav_version()
+    return {
+        "available": version != "unknown",
+        "version": version,
+        "status": "available" if version != "unknown" else "missing",
+    }
+
+
+def prepare_freshclam_log():
+    """Create the configured FreshClam log directory when it is missing."""
+    config_paths = ("/etc/clamav/freshclam.conf", "/etc/freshclam.conf")
+    log_path = "/var/log/clamav/freshclam.log"
+    for config_path in config_paths:
+        try:
+            with open(config_path, "r", encoding="utf-8") as config:
+                for line in config:
+                    line = line.strip()
+                    if line.startswith("UpdateLogFile "):
+                        configured = line.split(None, 1)[1].strip()
+                        if configured:
+                            log_path = configured
+                        break
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return "Unable to read FreshClam configuration: " + str(exc)
+        break
+
+    log_dir = os.path.dirname(log_path)
+    if not log_dir:
+        return ""
+    try:
+        if not os.path.isdir(log_dir):
+            os.makedirs(log_dir, mode=0o755, exist_ok=True)
+            try:
+                clamav_user = pwd.getpwnam("clamav")
+            except KeyError:
+                clamav_user = None
+            if clamav_user and os.geteuid() == 0:
+                os.chown(log_dir, clamav_user.pw_uid, clamav_user.pw_gid)
+    except OSError as exc:
+        return "Unable to prepare FreshClam log directory " + log_dir + ": " + str(exc)
+    return ""
+
+
+def prepare_freshclam_config():
+    """Create a temporary config with a writable FreshClam log path."""
+    for config_path in ("/etc/clamav/freshclam.conf", "/etc/freshclam.conf"):
+        try:
+            with open(config_path, "r", encoding="utf-8") as config:
+                contents = config.read()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return "", "Unable to read FreshClam configuration: " + str(exc)
+        lines = contents.splitlines()
+        replaced = False
+        for index, line in enumerate(lines):
+            if line.strip().startswith("UpdateLogFile "):
+                lines[index] = "UpdateLogFile /tmp/maldet-freshclam.log"
+                replaced = True
+                break
+        if not replaced:
+            lines.append("UpdateLogFile /tmp/maldet-freshclam.log")
+        try:
+            handle = tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", prefix="maldet-freshclam-",
+                suffix=".conf", delete=False)
+            with handle:
+                handle.write("\n".join(lines) + "\n")
+            return handle.name, ""
+        except OSError as exc:
+            return "", "Unable to create temporary FreshClam configuration: " + str(exc)
+    return "", ""
+
+
+def run_clamav_update(force=False):
+    """Update the ClamAV database using the host's freshclam command."""
+    before = get_clamav_status()
+    freshclam = find_system_command("freshclam")
+    if not freshclam:
+        return 127, {
+            "operation": "clamav database update",
+            "status": "failed",
+            "returncode": 127,
+            "stdout": "",
+            "stderr": "freshclam not found in PATH",
+            "before": before,
+            "after": before,
+            "changed": False,
+        }
+
+    # Keep service updates independent of the distro-specific log directory.
+    # FreshClam otherwise aborts before contacting the database servers when
+    # UpdateLogFile points to a directory that has not been provisioned.
+    config_path, config_error = prepare_freshclam_config()
+    if config_error:
+        return 1, {
+            "operation": "clamav database update",
+            "status": "failed",
+            "returncode": 1,
+            "stdout": "",
+            "stderr": config_error,
+            "before": before,
+            "after": before,
+            "changed": False,
+        }
+    command = [freshclam, "--stdout"]
+    if config_path:
+        command.append("--config-file=" + config_path)
+    if force:
+        command.append("--verbose")
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=180,
+            start_new_session=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, {
+            "operation": "clamav database update",
+            "status": "failed",
+            "returncode": 1,
+            "stdout": "",
+            "stderr": str(exc),
+            "before": before,
+            "after": before,
+            "changed": False,
+        }
+    finally:
+        if config_path:
+            try:
+                os.unlink(config_path)
+            except FileNotFoundError:
+                pass
+    after = get_clamav_status()
+    return result.returncode, {
+        "operation": "clamav database update",
+        "status": "completed" if result.returncode == 0 else "failed",
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "before": before,
+        "after": after,
+        "changed": before != after,
+    }
+
+
 def get_system_info():
     """Gather system information for the dashboard."""
+    installer_candidates = [
+        os.path.join(os.path.dirname(SCRIPT_DIR), "install.sh"),
+        os.path.join(get_base_dir(), "install.sh"),
+    ]
+    installer_path = next(
+        (path for path in installer_candidates if os.path.isfile(path)), "")
     info = {
         "hostname": platform.node(),
         "system": platform.system(),
@@ -182,10 +370,16 @@ def get_system_info():
         "python_version": platform.python_version(),
         "maldet_path": get_maldet_path(),
         "base_dir": get_base_dir(),
+        "installer_directory": os.path.dirname(installer_path) if installer_path else "",
+        "installer_path": installer_path,
         "log_dir": get_log_dir(),
+        "clamav_version": get_clamav_version(),
         "euid": os.geteuid(),
         "is_root": os.geteuid() == 0,
     }
+    clamav = get_clamav_status()
+    info["clamav_available"] = clamav["available"]
+    info["clamav_status"] = clamav["status"]
 
     # CPU info
     try:
@@ -338,17 +532,34 @@ def quarantine_details(filename):
     if os.path.isfile(history_path):
         with open(history_path, "r", errors="replace") as history:
             for line in reversed(history.readlines()):
-                parts = line.rstrip("\n").split(":", 7)
-                if len(parts) == 8 and os.path.realpath(parts[7]) == path:
+                line = line.rstrip("\n")
+                if not line or line.startswith("#"):
+                    continue
+                # The quarantined path is always the last ':'-separated field
+                # (same contract LMD itself relies on: awk -F':' '{print $NF}').
+                fields = line.split(":")
+                if len(fields) < 8 or os.path.realpath(fields[-1]) != path:
+                    continue
+                if len(fields) >= 12:
+                    # Batch-era format: ut:hostid:sig:hash:size:owner:group:
+                    # mode:atime:mtime:ctime:quarpath (times carries colons)
                     details.update({
-                        "detected_at": int(parts[0]) if parts[0].isdigit() else parts[0],
-                        "signature": parts[1],
-                        "detected_path": parts[2],
-                        "detected_user": parts[3],
-                        "detected_group": parts[4],
-                        "md5": parts[5],
+                        "detected_at": int(fields[0]) if fields[0].isdigit() else fields[0],
+                        "signature": fields[2],
+                        "md5": fields[3],
+                        "detected_path": fields[-1],
                     })
                     break
+                # Legacy format: utime:hitname:file:owner:group:md5:size:quarpath
+                details.update({
+                    "detected_at": int(fields[0]) if fields[0].isdigit() else fields[0],
+                    "signature": fields[1],
+                    "detected_path": fields[2],
+                    "detected_user": fields[3],
+                    "detected_group": fields[4],
+                    "md5": fields[5],
+                })
+                break
     return details
 
 
@@ -419,6 +630,29 @@ def parse_quarantine_list():
     """Parse the quarantine directory to list all quarantined files."""
     quar_dir = get_quarantine_dir()
     files = []
+    # Signature lookup from quarantine.hist (quarpath -> sig). Supports both
+    # the current 10-field format (ut:hostid:sig:hash:size:owner:group:mode:
+    # times:quarpath) and the legacy 8-field format.
+    hist_sigs = {}
+    history_path = os.path.join(get_session_dir(), "quarantine.hist")
+    if os.path.isfile(history_path):
+        try:
+            with open(history_path, "r", errors="replace") as history:
+                for line in history:
+                    line = line.rstrip("\n")
+                    if not line or line.startswith("#"):
+                        continue
+                    fields = line.split(":")
+                    if len(fields) < 8:
+                        continue
+                    quarpath = fields[-1]
+                    # >=12 fields: batch-era format (ut:hostid:sig:hash:size:
+                    # owner:group:mode:atime:mtime:ctime:quarpath — times
+                    # carries colons). 8 fields: legacy format with sig in
+                    # position 1. The quarpath is always the last field.
+                    hist_sigs[quarpath] = fields[2] if len(fields) >= 12 else fields[1]
+        except Exception:
+            pass
     try:
         if not os.path.isdir(quar_dir):
             return files
@@ -428,23 +662,32 @@ def parse_quarantine_list():
             if not os.path.isfile(full_path) or entry.endswith(".info"):
                 continue
             info = {"name": entry, "path": full_path, "size": os.path.getsize(full_path)}
+            # .info format: owner:group:mode:size(b):hash:atime:mtime:ctime:path
             if os.path.isfile(info_path):
                 try:
                     for line in open(info_path, "r", errors="replace"):
-                        parts = line.strip().split(":", 8)
+                        stripped = line.strip()
+                        if not stripped or stripped.startswith("#"):
+                            continue
+                        parts = stripped.split(":", 8)
                         if len(parts) >= 9:
-                            info["signature"] = parts[0]
+                            info["owner"] = parts[0]
                             info["original_path"] = parts[8]
                             try:
-                                info["mtime"] = int(parts[5])
+                                info["mtime"] = int(parts[6])
                             except (ValueError, IndexError):
                                 pass
                             try:
-                                info["size_orig"] = int(parts[4])
+                                info["size_orig"] = int(parts[3])
                             except (ValueError, IndexError):
                                 pass
+                        break
                 except Exception:
                     pass
+            try:
+                info["signature"] = hist_sigs.get(os.path.realpath(full_path), "-")
+            except OSError:
+                info["signature"] = "-"
             files.append(info)
     except Exception:
         pass
@@ -538,6 +781,8 @@ def safe_json_active():
     stripped = result.stdout.strip()
     if not stripped or stripped.startswith("No active"):
         return {"active_scans": []}
+    if result.returncode not in (0, 2):
+        raise RuntimeError(result.stderr.strip() or "Failed to read active scans")
     return json.loads(stripped)
 
 
@@ -619,14 +864,14 @@ class MaldetAPI:
             try:
                 data = safe_json_list()
                 return 200, data
-            except Exception:
-                return 200, {"reports": [], "active_scans": [], "stopped_scans": []}
+            except Exception as exc:
+                return 503, {"error": "Unable to load scan reports: " + str(exc)}
 
         if route == "/api/scans/active" and method == "GET":
             try:
                 return 200, safe_json_active()
-            except Exception:
-                return 200, {"active_scans": []}
+            except Exception as exc:
+                return 503, {"error": "Unable to load active scans: " + str(exc)}
 
         if route.startswith("/api/scan/") and method == "GET":
             scan_id = route.split("/")[3]
@@ -678,24 +923,58 @@ class MaldetAPI:
         if route == "/api/monitor/users":
             return MaldetAPI._monitor_users(method, body or {})
 
+        if route == "/api/monitor/webserver":
+            return MaldetAPI._monitor_webserver(method, body or {})
+
+        if route == "/api/monitor/activity" and method == "GET":
+            return MaldetAPI._monitor_activity(query)
+
         # ---- Updates ----
         if route == "/api/update/sigs" and method == "POST":
             data = body or {}
+            before = get_system_info()
             args = ["-u"]
             if data.get("force"):
                 args.append("--force")
             out, err, rc = run_maldet(args, timeout=120)
-            return 200, {"returncode": rc, "stdout": out, "stderr": err}
+            after = get_system_info()
+            return (200 if rc == 0 else 400), {
+                "operation": "signature update",
+                "status": "completed" if rc == 0 else "failed",
+                "returncode": rc,
+                "stdout": out,
+                "stderr": err,
+                "before": {"signature_version": before.get("signature_version")},
+                "after": {"signature_version": after.get("signature_version")},
+                "changed": before.get("signature_version") != after.get("signature_version"),
+            }
 
         if route == "/api/update/version" and method == "POST":
             data = body or {}
+            before = get_system_info()
             args = ["-d"]
             if data.get("force"):
                 args.append("--force")
             if data.get("beta"):
                 args.append("--beta")
             out, err, rc = run_maldet(args, timeout=120)
-            return 200, {"returncode": rc, "stdout": out, "stderr": err}
+            after = get_system_info()
+            return (200 if rc == 0 else 400), {
+                "operation": "beta version update" if data.get("beta") else "version update",
+                "status": "completed" if rc == 0 else "failed",
+                "returncode": rc,
+                "stdout": out,
+                "stderr": err,
+                "before": {"version": before.get("version")},
+                "after": {"version": after.get("version")},
+                "changed": before.get("version") != after.get("version"),
+            }
+
+        if route == "/api/update/clamav" and method == "POST":
+            data = body or {}
+            return_code, payload = run_clamav_update(
+                force=bool(data.get("force")))
+            return (200 if return_code == 0 else 400), payload
 
         # ---- Test alerts ----
         if route == "/api/test-alert" and method == "POST":
@@ -781,8 +1060,17 @@ class MaldetAPI:
         scan_type = data.get("type", "all")
         if scan_type == "filelist":
             return 400, {"error": "File list scans are disabled in the GUI"}
+        if scan_type not in ("all", "recent"):
+            return 400, {"error": "Unsupported scan type: " + str(scan_type)}
         path = data.get("path", "/home")
         days = data.get("days", "7")
+        if scan_type == "recent":
+            try:
+                days = str(int(days))
+                if int(days) < 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return 400, {"error": "Recent scans require a positive number of days"}
         config_overrides = data.get("config_overrides", "")
         # GUI scans always use Maldet's native engine, regardless of any
         # stale or forged ClamAV override supplied by a client.
@@ -798,6 +1086,7 @@ class MaldetAPI:
         path = os.path.abspath(os.path.expanduser(str(path).strip()))
         if not os.path.isdir(path):
             return 400, {"error": "Scan directory does not exist: " + path}
+        path = os.path.realpath(path)
 
         args = ["-b"]
         if config_overrides:
@@ -814,7 +1103,39 @@ class MaldetAPI:
         else:
             args.extend(["-a", path])
 
-        out, err, rc = run_maldet(args, timeout=60)
+        with SCAN_START_LOCK:
+            now = time.monotonic()
+            expired = [
+                reserved_path for reserved_path, reserved_at in SCAN_START_RESERVATIONS.items()
+                if now - reserved_at >= SCAN_START_RESERVATION_TTL
+            ]
+            for reserved_path in expired:
+                del SCAN_START_RESERVATIONS[reserved_path]
+            if path in SCAN_START_RESERVATIONS:
+                return 409, {
+                    "error": "A scan for this directory is already being processed; wait for its status to appear"
+                }
+            try:
+                active_data = safe_json_active()
+                active_scans = [
+                    item for item in active_data.get("active_scans", [])
+                    if isinstance(item, dict)
+                ]
+                same_path = [
+                    item for item in active_scans
+                    if os.path.realpath(str(item.get("path", ""))) == path
+                ]
+                if same_path:
+                    ids = ", ".join(str(item.get("scan_id", "unknown")) for item in same_path)
+                    return 409, {
+                        "error": "A scan for this directory is already active" + (": " + ids if ids else "")
+                    }
+            except Exception as exc:
+                return 503, {"error": "Unable to verify active scans: " + str(exc)}
+            SCAN_START_RESERVATIONS[path] = now
+            out, err, rc = run_maldet(args, timeout=60)
+            if rc not in (0, 2) and "scan in progress" not in (out + err).lower():
+                SCAN_START_RESERVATIONS.pop(path, None)
         ok = (rc == 0) or ("scan in progress" in (out + err).lower())
         if ok:
             return 200, {"message": "Scan started in background",
@@ -852,6 +1173,13 @@ class MaldetAPI:
                 args.extend(["--mailto", mailto])
             out, err, rc = run_maldet(args, timeout=30)
             return 200, {"returncode": rc, "stdout": out, "stderr": err}
+        if action in ("quarantine", "restore"):
+            try:
+                report = safe_json_report(scan_id)
+                if not report.get("reports"):
+                    return 404, {"error": "Scan report not found: " + scan_id}
+            except Exception as exc:
+                return 404, {"error": "Scan report not found: " + str(exc)}
         if action not in actions:
             return 400, {"error": "Unknown action: " + action}
         out, err, rc = actions[action]()
@@ -876,13 +1204,122 @@ class MaldetAPI:
     @staticmethod
     def _handle_quarantine_action(action, data):
         """Handle quarantine actions (restore, view info)."""
+        if action == "restore-all":
+            files = parse_quarantine_list()
+            results = []
+            for item in files:
+                filename = item.get("name", "")
+                if not filename or os.path.basename(filename) != filename:
+                    results.append({"file": filename, "ok": False, "error": "Invalid quarantine filename"})
+                    continue
+                try:
+                    quarantine_details(filename)
+                except (FileNotFoundError, ValueError):
+                    results.append({"file": filename, "ok": False, "error": "Quarantined file not found"})
+                    continue
+                out, err, rc = run_maldet(["-s", filename], timeout=30)
+                results.append({
+                    "file": filename,
+                    "ok": rc in (0, 2),
+                    "returncode": rc,
+                    "stdout": out,
+                    "stderr": err,
+                })
+            failed = [item for item in results if not item["ok"]]
+            return (200 if not failed else 207), {
+                "restored": len(results) - len(failed),
+                "failed": len(failed),
+                "results": results,
+            }
         if action == "restore":
             file_path = data.get("file", "")
-            if not file_path:
+            if not file_path or os.path.basename(file_path) != file_path:
                 return 400, {"error": "Missing 'file' parameter"}
+            try:
+                quarantine_details(file_path)
+            except (FileNotFoundError, ValueError):
+                return 404, {"error": "Quarantined file not found"}
             out, err, rc = run_maldet(["-s", file_path], timeout=30)
             return (200 if rc in (0, 2) else 400), {
                 "returncode": rc, "stdout": out, "stderr": err}
+        if action == "clean":
+            # Individual clean attempt for one quarantined file, reusing
+            # maldet's native cleaner (`maldet -n <scanid>`): build a temporary
+            # TSV hit list (sig, filepath, quarpath, ...) pointing at the
+            # quarantined file and let LMD restore + clean + rescan it. If the
+            # clean fails, LMD moves the file back into quarantine.
+            file_path = data.get("file", "")
+            if not file_path or os.path.basename(file_path) != file_path:
+                return 400, {"error": "Missing 'file' parameter"}
+            try:
+                details = quarantine_details(file_path)
+            except (FileNotFoundError, ValueError):
+                return 404, {"error": "Quarantined file not found"}
+            quarpath = details.get("path") or ""
+            sig = details.get("signature") or ""
+            if not quarpath or not os.path.isfile(quarpath):
+                return 404, {"error": "Quarantined file not found"}
+            if not sig:
+                return 400, {"error": "Signature unknown for this file "
+                                      "(no quarantine history entry); unable to clean"}
+            sessdir = get_session_dir()
+            try:
+                os.makedirs(sessdir, exist_ok=True)
+            except OSError as exc:
+                return 500, {"error": "Cannot access session directory: " + str(exc)}
+            sid = "gui-clean.%d" % os.getpid()
+            hitlist = os.path.join(sessdir, "session.hits." + sid)
+            # TSV hit format: sig, filepath, quarpath, hit_type, hit_type_label,
+            # hash, size, owner, group, mode, mtime
+            hit_line = "\t".join([
+                sig, details.get("original_path") or quarpath, quarpath,
+                "-", "-", str(details.get("hash") or "-"),
+                str(details.get("size") or 0), details.get("owner") or "-",
+                details.get("group") or "-", details.get("mode") or "-", "0",
+            ]) + "\n"
+            try:
+                with open(hitlist, "w", encoding="utf-8") as fh:
+                    fh.write("#LMD:v1\n")
+                    fh.write(hit_line)
+            except OSError as exc:
+                return 500, {"error": "Cannot write temporary hit list: " + str(exc)}
+            try:
+                out, err, rc = run_maldet(
+                    ["-co", "quarantine_clean=1", "-co", "quarantine_hits=1",
+                     "-n", sid], timeout=300)
+            finally:
+                try:
+                    os.remove(hitlist)
+                except OSError:
+                    pass
+            cleaned = not os.path.isfile(quarpath)
+            return (200 if rc in (0, 2) else 400), {
+                "returncode": rc, "cleaned": cleaned,
+                "stdout": out, "stderr": err}
+        if action == "delete":
+            # Permanently delete one quarantined file (and its .info metadata).
+            file_path = data.get("file", "")
+            if not file_path or os.path.basename(file_path) != file_path:
+                return 400, {"error": "Missing 'file' parameter"}
+            try:
+                details = quarantine_details(file_path)
+            except (FileNotFoundError, ValueError):
+                return 404, {"error": "Quarantined file not found"}
+            quarpath = details.get("path") or ""
+            try:
+                os.remove(quarpath)
+            except FileNotFoundError:
+                return 404, {"error": "Quarantined file not found"}
+            except OSError as exc:
+                return 500, {"error": "Cannot delete quarantined file: " + str(exc)}
+            info_path = quarpath + ".info"
+            try:
+                if os.path.isfile(info_path):
+                    os.remove(info_path)
+            except OSError as exc:
+                return 207, {"deleted": True,
+                             "warning": "Quarantined file deleted but its .info metadata could not be removed: " + str(exc)}
+            return 200, {"deleted": True, "file": file_path}
         return 400, {"error": "Unknown action: " + action}
 
     @staticmethod
@@ -917,6 +1354,59 @@ class MaldetAPI:
             return bool(result.stdout.strip())
         except Exception:
             return False
+
+    @staticmethod
+    def _monitor_activity(query=None):
+        """Tail the monitor's inotify_log: files/events seen in real time.
+
+        The inotifywait process writes lines in the format
+        `<full path> <EVENTS> <dd> <Mon> <HH:MM:SS>` (format "%w%f %e %T"),
+        e.g. `/home/user/public_html/x.php CREATE 12 Sep 10:00:00`.
+        """
+        try:
+            limit = int((query or {}).get("lines", ["50"])[0])
+        except (ValueError, IndexError):
+            limit = 50
+        limit = max(1, min(limit, 200))
+        log_path = os.path.join(get_log_dir(), "inotify_log")
+        running = MaldetAPI._monitor_running()
+        entries = []
+        total_events = 0
+        if os.path.isfile(log_path):
+            try:
+                with open(log_path, "r", errors="replace") as fh:
+                    lines = fh.readlines()
+                events = [l for l in lines if l.strip()]
+                total_events = len(events)
+                for raw in reversed(events[-limit:]):
+                    line = raw.rstrip("\n")
+                    if not line.strip():
+                        continue
+                    # inotifywait format "%w%f %e %T": `<full path> <EVENTS>
+                    # <dd> <Mon> <HH:MM:SS>`. The path may contain spaces, so
+                    # anchor on the `<EVENT> <date suffix>` tail instead of
+                    # token counting.
+                    mline = re.match(
+                        r"^(.*\S)\s+([A-Z][A-Z_,|]*)\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{2}:\d{2}:\d{2})$",
+                        line)
+                    if mline:
+                        entries.append({
+                            "file": mline.group(1),
+                            "event": mline.group(2),
+                            "time": mline.group(3),
+                        })
+                    else:
+                        entries.append({"file": line, "event": "-", "time": ""})
+            except OSError as exc:
+                return 503, {"error": "Cannot read monitor log: " + str(exc),
+                             "log_path": log_path, "running": running}
+        return 200, {
+            "running": running,
+            "log_path": log_path,
+            "log_exists": os.path.isfile(log_path),
+            "total_events": total_events,
+            "entries": entries,
+        }
 
     @staticmethod
     def _systemd_unit():
@@ -1121,6 +1611,74 @@ class MaldetAPI:
                      "disabled": sorted(set(requested)), "restart_required": True}
 
     @staticmethod
+    def _monitor_webserver(method, data):
+        """Detect the running web server and toggle monitoring of its docroots.
+
+        GET: runs `maldet --webserver-detect` (the same detection used by the
+        monitor's inotify_docroot_autodetect feature) and reports the detected
+        web server(s), their document root(s) (e.g. public_html) and whether
+        autodetect monitoring is currently enabled.
+        POST: {enabled: true|false} persists inotify_docroot_autodetect in
+        conf.maldet; takes effect when the monitor is (re)started/reloaded.
+        """
+        conf_path = get_conf_path()
+        if method == "POST":
+            enabled = data.get("enabled")
+            if not isinstance(enabled, bool):
+                return 400, {"error": "Missing or invalid 'enabled' boolean"}
+            value = "1" if enabled else "0"
+            ok, msg = write_config_change(conf_path, "inotify_docroot_autodetect", value)
+            if not ok:
+                return 400, {"error": msg}
+            return 200, {
+                "message": ("Monitoring of detected document roots "
+                            "(e.g. public_html) " + ("enabled" if enabled else "disabled")),
+                "autodetect": value, "restart_required": True,
+            }
+        if method != "GET":
+            return 405, {"error": "Method not allowed"}
+        config = parse_config(conf_path)
+        autodetect = config.get("inotify_docroot_autodetect", {})
+        if isinstance(autodetect, dict):
+            autodetect = autodetect.get("value", "0")
+        autodetect = "1" if str(autodetect).strip() == "1" else "0"
+        servers, docroots = [], []
+        current_server = None
+        in_docroots = False
+        try:
+            out, err, rc = run_maldet(["--webserver-detect"], timeout=60)
+        except Exception as exc:
+            return 503, {"error": "Failed to run web server detection: " + str(exc)}
+        for line in (out or "").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("web server detected:"):
+                name = stripped.split(":", 1)[1].strip()
+                in_docroots = False
+                if name and name != "none":
+                    servers.append(name)
+                else:
+                    current_server = None
+                continue
+            if stripped == "document roots:":
+                in_docroots = True
+                continue
+            if stripped.startswith("document roots: none"):
+                in_docroots = False
+                continue
+            if in_docroots and stripped.startswith("/"):
+                if stripped not in docroots:
+                    docroots.append(stripped)
+        return 200, {
+            "detected": bool(servers),
+            "servers": servers,
+            "docroots": docroots,
+            "autodetect": autodetect,
+            "conf_path": conf_path,
+            "stdout": out or "",
+            "stderr": err or "",
+        }
+
+    @staticmethod
     def _test_alert(alert_type, channel):
         """Send a test alert via the specified channel."""
         if alert_type not in ("scan", "digest"):
@@ -1249,6 +1807,21 @@ class Handler(BaseHTTPRequestHandler):
             if self._authenticated():
                 return self._send_json({"authenticated": True, "setup_required": False})
             return self._send_json({"authenticated": False, "setup_required": not auth_required()})
+        if route == "/api/systray/status":
+            try:
+                data = safe_json_active()
+                scans = data.get("active_scans", data.get("active", []))
+                states = {}
+                for scan in scans if isinstance(scans, list) else []:
+                    state = str(scan.get("state", "running"))
+                    states[state] = states.get(state, 0) + 1
+                return self._send_json({
+                    "available": True,
+                    "active_count": len(scans) if isinstance(scans, list) else 0,
+                    "states": states,
+                })
+            except Exception as exc:
+                return self._send_json({"available": False, "error": str(exc)}, 503)
         if route.startswith("/api/") and not self._authenticated():
             return self._auth_response()
         # Serve static files

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-URL="${MALDET_GUI_URL:-http://127.0.0.1:${MALDET_GUI_PORT:-8080}}"
+URL="${MALDET_GUI_URL:-http://127.0.0.1:${MALDET_GUI_PORT:-32501}}"
 LAUNCHER="${MALDET_GUI_LAUNCHER:-$SCRIPT_DIR/launch.sh}"
 LOG="${MALDET_GUI_LOG:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/maldet/gui.log}"
 
