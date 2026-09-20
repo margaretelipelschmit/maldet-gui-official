@@ -1662,6 +1662,9 @@
         if (!textarea) return;
         button.disabled = true;
         API.put('/ignore', { filename: name, lines: textarea.value.split(/\r?\n/) }).then(function() {
+            return API.get('/ignore');
+        }).then(function() {
+            Router.navigate('ignore');
             toast(tr('Ignore list saved'), 'success');
         }).catch(function(err) {
             toast(tr('Ignore list save failed: ') + err.message, 'error');
