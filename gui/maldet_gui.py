@@ -24,6 +24,7 @@ import platform
 import pwd
 import hashlib
 import secrets
+import tempfile
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -251,6 +252,37 @@ def prepare_freshclam_log():
     return ""
 
 
+def prepare_freshclam_config():
+    """Create a temporary config with a writable FreshClam log path."""
+    for config_path in ("/etc/clamav/freshclam.conf", "/etc/freshclam.conf"):
+        try:
+            with open(config_path, "r", encoding="utf-8") as config:
+                contents = config.read()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return "", "Unable to read FreshClam configuration: " + str(exc)
+        lines = contents.splitlines()
+        replaced = False
+        for index, line in enumerate(lines):
+            if line.strip().startswith("UpdateLogFile "):
+                lines[index] = "UpdateLogFile /tmp/maldet-freshclam.log"
+                replaced = True
+                break
+        if not replaced:
+            lines.append("UpdateLogFile /tmp/maldet-freshclam.log")
+        try:
+            handle = tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", prefix="maldet-freshclam-",
+                suffix=".conf", delete=False)
+            with handle:
+                handle.write("\n".join(lines) + "\n")
+            return handle.name, ""
+        except OSError as exc:
+            return "", "Unable to create temporary FreshClam configuration: " + str(exc)
+    return "", ""
+
+
 def run_clamav_update(force=False):
     """Update the ClamAV database using the host's freshclam command."""
     before = get_clamav_status()
@@ -266,19 +298,25 @@ def run_clamav_update(force=False):
             "after": before,
             "changed": False,
         }
-    preparation_error = prepare_freshclam_log()
-    if preparation_error:
+
+    # Keep service updates independent of the distro-specific log directory.
+    # FreshClam otherwise aborts before contacting the database servers when
+    # UpdateLogFile points to a directory that has not been provisioned.
+    config_path, config_error = prepare_freshclam_config()
+    if config_error:
         return 1, {
             "operation": "clamav database update",
             "status": "failed",
             "returncode": 1,
             "stdout": "",
-            "stderr": preparation_error,
+            "stderr": config_error,
             "before": before,
             "after": before,
             "changed": False,
         }
-    command = [freshclam]
+    command = [freshclam, "--stdout"]
+    if config_path:
+        command.append("--config-file=" + config_path)
     if force:
         command.append("--verbose")
     try:
@@ -296,6 +334,12 @@ def run_clamav_update(force=False):
             "after": before,
             "changed": False,
         }
+    finally:
+        if config_path:
+            try:
+                os.unlink(config_path)
+            except FileNotFoundError:
+                pass
     after = get_clamav_status()
     return result.returncode, {
         "operation": "clamav database update",
