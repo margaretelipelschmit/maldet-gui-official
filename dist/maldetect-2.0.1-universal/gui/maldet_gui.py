@@ -24,6 +24,7 @@ import platform
 import pwd
 import hashlib
 import secrets
+import tempfile
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -177,7 +178,7 @@ def run_maldet(args, timeout=30, capture=True):
 def get_clamav_version():
     """Return the installed ClamAV scanner version, if available."""
     for command in ("clamscan", "clamdscan"):
-        path = shutil.which(command)
+        path = find_system_command(command)
         if not path:
             continue
         try:
@@ -192,10 +193,100 @@ def get_clamav_version():
     return "unknown"
 
 
+def find_system_command(command):
+    """Resolve a system command even when the service has a minimal PATH."""
+    path = shutil.which(command)
+    if path:
+        return path
+    for directory in ("/usr/bin", "/usr/sbin", "/bin", "/sbin"):
+        candidate = os.path.join(directory, command)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return ""
+
+
+def get_clamav_status():
+    """Return a stable status for the ClamAV scanner used by the GUI."""
+    version = get_clamav_version()
+    return {
+        "available": version != "unknown",
+        "version": version,
+        "status": "available" if version != "unknown" else "missing",
+    }
+
+
+def prepare_freshclam_log():
+    """Create the configured FreshClam log directory when it is missing."""
+    config_paths = ("/etc/clamav/freshclam.conf", "/etc/freshclam.conf")
+    log_path = "/var/log/clamav/freshclam.log"
+    for config_path in config_paths:
+        try:
+            with open(config_path, "r", encoding="utf-8") as config:
+                for line in config:
+                    line = line.strip()
+                    if line.startswith("UpdateLogFile "):
+                        configured = line.split(None, 1)[1].strip()
+                        if configured:
+                            log_path = configured
+                        break
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return "Unable to read FreshClam configuration: " + str(exc)
+        break
+
+    log_dir = os.path.dirname(log_path)
+    if not log_dir:
+        return ""
+    try:
+        if not os.path.isdir(log_dir):
+            os.makedirs(log_dir, mode=0o755, exist_ok=True)
+            try:
+                clamav_user = pwd.getpwnam("clamav")
+            except KeyError:
+                clamav_user = None
+            if clamav_user and os.geteuid() == 0:
+                os.chown(log_dir, clamav_user.pw_uid, clamav_user.pw_gid)
+    except OSError as exc:
+        return "Unable to prepare FreshClam log directory " + log_dir + ": " + str(exc)
+    return ""
+
+
+def prepare_freshclam_config():
+    """Create a temporary config with a writable FreshClam log path."""
+    for config_path in ("/etc/clamav/freshclam.conf", "/etc/freshclam.conf"):
+        try:
+            with open(config_path, "r", encoding="utf-8") as config:
+                contents = config.read()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return "", "Unable to read FreshClam configuration: " + str(exc)
+        lines = contents.splitlines()
+        replaced = False
+        for index, line in enumerate(lines):
+            if line.strip().startswith("UpdateLogFile "):
+                lines[index] = "UpdateLogFile /tmp/maldet-freshclam.log"
+                replaced = True
+                break
+        if not replaced:
+            lines.append("UpdateLogFile /tmp/maldet-freshclam.log")
+        try:
+            handle = tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", prefix="maldet-freshclam-",
+                suffix=".conf", delete=False)
+            with handle:
+                handle.write("\n".join(lines) + "\n")
+            return handle.name, ""
+        except OSError as exc:
+            return "", "Unable to create temporary FreshClam configuration: " + str(exc)
+    return "", ""
+
+
 def run_clamav_update(force=False):
     """Update the ClamAV database using the host's freshclam command."""
-    before = get_clamav_version()
-    freshclam = shutil.which("freshclam")
+    before = get_clamav_status()
+    freshclam = find_system_command("freshclam")
     if not freshclam:
         return 127, {
             "operation": "clamav database update",
@@ -203,11 +294,29 @@ def run_clamav_update(force=False):
             "returncode": 127,
             "stdout": "",
             "stderr": "freshclam not found in PATH",
-            "before": {"clamav_version": before},
-            "after": {"clamav_version": before},
+            "before": before,
+            "after": before,
             "changed": False,
         }
-    command = [freshclam]
+
+    # Keep service updates independent of the distro-specific log directory.
+    # FreshClam otherwise aborts before contacting the database servers when
+    # UpdateLogFile points to a directory that has not been provisioned.
+    config_path, config_error = prepare_freshclam_config()
+    if config_error:
+        return 1, {
+            "operation": "clamav database update",
+            "status": "failed",
+            "returncode": 1,
+            "stdout": "",
+            "stderr": config_error,
+            "before": before,
+            "after": before,
+            "changed": False,
+        }
+    command = [freshclam, "--stdout"]
+    if config_path:
+        command.append("--config-file=" + config_path)
     if force:
         command.append("--verbose")
     try:
@@ -221,19 +330,25 @@ def run_clamav_update(force=False):
             "returncode": 1,
             "stdout": "",
             "stderr": str(exc),
-            "before": {"clamav_version": before},
-            "after": {"clamav_version": before},
+            "before": before,
+            "after": before,
             "changed": False,
         }
-    after = get_clamav_version()
+    finally:
+        if config_path:
+            try:
+                os.unlink(config_path)
+            except FileNotFoundError:
+                pass
+    after = get_clamav_status()
     return result.returncode, {
         "operation": "clamav database update",
         "status": "completed" if result.returncode == 0 else "failed",
         "returncode": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
-        "before": {"clamav_version": before},
-        "after": {"clamav_version": after},
+        "before": before,
+        "after": after,
         "changed": before != after,
     }
 
@@ -262,6 +377,9 @@ def get_system_info():
         "euid": os.geteuid(),
         "is_root": os.geteuid() == 0,
     }
+    clamav = get_clamav_status()
+    info["clamav_available"] = clamav["available"]
+    info["clamav_status"] = clamav["status"]
 
     # CPU info
     try:
