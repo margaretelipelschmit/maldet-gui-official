@@ -101,7 +101,7 @@
         screen.className = 'auth-screen';
         screen.innerHTML = '<div class="auth-card"><h1>Maldet GUI</h1><p>' +
             (setup ? 'Defina a senha inicial da WebGUI.' : 'Informe a senha da WebGUI.') +
-            '</p><form id="auth-form"><input id="auth-password" type="password" minlength="8" required placeholder="Senha (mínimo 8 caracteres)">' +
+            '</p><form id="auth-form"><input id="auth-password" type="password" minlength="8" required placeholder="' + tr('Password (minimum 8 characters)') + '">' +
             '<button class="btn btn-primary" type="submit">' + (setup ? 'Definir senha' : 'Entrar') + '</button><p id="auth-error" class="auth-error"></p></form></div>';
         (content || document.body).appendChild(screen);
         screen.querySelector('#auth-form').addEventListener('submit', function(e) {
@@ -273,7 +273,39 @@
             'New password must contain at least 8 characters.': 'A nova senha deve ter no mínimo 8 caracteres.',
             'New passwords do not match.': 'As novas senhas não coincidem.',
             'Password changed successfully.': 'Senha alterada com sucesso.',
-            'Password change failed: ': 'Falha ao alterar a senha: '
+            'Password change failed: ': 'Falha ao alterar a senha: ',
+            'Refresh': 'Atualizar', 'Settings': 'Configurações',
+            'maldet not found': 'maldet não encontrado',
+            'System Information': 'Informações do sistema', 'CPU': 'CPU',
+            'cores': 'núcleos', 'ClamAV Status': 'Status do ClamAV',
+            'Maldet Version': 'Versão do Maldet', 'Signature Set': 'Conjunto de assinaturas',
+            'Binary Detection': 'Detecção de binários', 'not found': 'não encontrado',
+            'Installation directory:': 'Diretório de instalação:',
+            'Installer directory:': 'Diretório do instalador:',
+            'Installer:': 'Instalador:', 'Update details': 'Detalhes da atualização',
+            'Status:': 'Status:', 'Operation:': 'Operação:', 'Before:': 'Antes:',
+            'After:': 'Depois:', 'Changed:': 'Alterado:', 'Command output': 'Saída do comando',
+            'No output returned by maldet.': 'O maldet não retornou saída.',
+            'Scan Configuration': 'Configuração do scan', 'Choose a folder or enter an absolute directory path manually.':
+                'Escolha uma pasta ou informe manualmente um caminho absoluto.',
+            'Scans files changed within the selected number of days.':
+                'Escaneia arquivos alterados dentro do número de dias selecionado.',
+            'Choose scan folder': 'Escolher pasta do scan', 'Loading folders...': 'Carregando pastas...',
+            'No subfolders found.': 'Nenhuma subpasta encontrada.',
+            'Cannot read this directory: ': 'Não foi possível ler este diretório: ',
+            'Scan details': 'Detalhes do scan', 'Infection details': 'Detalhes da infecção',
+            'Scan report': 'Relatório do scan', 'Error loading details: ': 'Erro ao carregar detalhes: ',
+            'Error loading report: ': 'Erro ao carregar relatório: ',
+            'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
+            'Deleting...': 'Excluindo...', 'Restoring all...': 'Restaurando tudo...',
+            'Quarantining...': 'Colocando em quarentena...', 'Send Test Alert': 'Enviar alerta de teste',
+            'Sending...': 'Enviando...', 'Saving...': 'Salvando...',
+            'Maintenance complete': 'Manutenção concluída', 'Purge complete': 'Limpeza concluída',
+            'Clear all logs, quarantine, and temp data?':
+                'Limpar todos os logs, a quarentena e os dados temporários?',
+            'Password (minimum 8 characters)': 'Senha (mínimo 8 caracteres)',
+            'Error': 'Erro', 'Network error': 'Erro de rede',
+            'Request timed out': 'Tempo limite da requisição excedido'
         }
     };
     function tr(text) {
@@ -286,6 +318,14 @@
         while ((node = walker.nextNode())) {
             var value = node.nodeValue.trim();
             if (value && I18N.pt[value]) node.nodeValue = node.nodeValue.replace(value, I18N.pt[value]);
+        }
+        var elements = (root || document.body).querySelectorAll ?
+            (root || document.body).querySelectorAll('[title], [placeholder], [aria-label]') : [];
+        for (var i = 0; i < elements.length; i++) {
+            ['title', 'placeholder', 'aria-label'].forEach(function(attribute) {
+                var value = elements[i].getAttribute(attribute);
+                if (value && I18N.pt[value]) elements[i].setAttribute(attribute, I18N.pt[value]);
+            });
         }
         document.documentElement.lang = 'pt-BR';
     }
