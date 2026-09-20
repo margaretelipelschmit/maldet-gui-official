@@ -214,6 +214,43 @@ def get_clamav_status():
     }
 
 
+def prepare_freshclam_log():
+    """Create the configured FreshClam log directory when it is missing."""
+    config_paths = ("/etc/clamav/freshclam.conf", "/etc/freshclam.conf")
+    log_path = "/var/log/clamav/freshclam.log"
+    for config_path in config_paths:
+        try:
+            with open(config_path, "r", encoding="utf-8") as config:
+                for line in config:
+                    line = line.strip()
+                    if line.startswith("UpdateLogFile "):
+                        configured = line.split(None, 1)[1].strip()
+                        if configured:
+                            log_path = configured
+                        break
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return "Unable to read FreshClam configuration: " + str(exc)
+        break
+
+    log_dir = os.path.dirname(log_path)
+    if not log_dir:
+        return ""
+    try:
+        if not os.path.isdir(log_dir):
+            os.makedirs(log_dir, mode=0o755, exist_ok=True)
+            try:
+                clamav_user = pwd.getpwnam("clamav")
+            except KeyError:
+                clamav_user = None
+            if clamav_user and os.geteuid() == 0:
+                os.chown(log_dir, clamav_user.pw_uid, clamav_user.pw_gid)
+    except OSError as exc:
+        return "Unable to prepare FreshClam log directory " + log_dir + ": " + str(exc)
+    return ""
+
+
 def run_clamav_update(force=False):
     """Update the ClamAV database using the host's freshclam command."""
     before = get_clamav_status()
@@ -225,6 +262,18 @@ def run_clamav_update(force=False):
             "returncode": 127,
             "stdout": "",
             "stderr": "freshclam not found in PATH",
+            "before": before,
+            "after": before,
+            "changed": False,
+        }
+    preparation_error = prepare_freshclam_log()
+    if preparation_error:
+        return 1, {
+            "operation": "clamav database update",
+            "status": "failed",
+            "returncode": 1,
+            "stdout": "",
+            "stderr": preparation_error,
             "before": before,
             "after": before,
             "changed": False,
