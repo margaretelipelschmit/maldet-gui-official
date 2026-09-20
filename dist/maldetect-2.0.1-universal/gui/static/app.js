@@ -156,7 +156,8 @@
             'Quarantined Files': 'Arquivos em quarentena', 'Scan Reports': 'Relatórios de scans',
             'Quarantine': 'Quarentenar', 'Restore': 'Restaurar', 'Inotify Monitoring': 'Monitoramento inotify',
             'Start': 'Iniciar', 'Reload': 'Recarregar', 'Update': 'Atualizar', 'Beta': 'Beta',
-            'Update Sigs': 'Atualizar assinaturas', 'Save Changes': 'Salvar alterações',
+            'Update Sigs': 'Atualizar assinaturas', 'Update ClamAV': 'Atualizar ClamAV',
+            'Save Changes': 'Salvar alterações',
             'Test Alerts': 'Testar alertas', 'Type': 'Tipo', 'Channel': 'Canal',
             'Send Test Alert': 'Enviar alerta de teste', 'Event Log': 'Log de eventos',
             'entries': 'entradas', 'Maintenance': 'Manutenção', 'Run Maintenance': 'Executar manutenção',
@@ -164,6 +165,9 @@
             'Signature Set': 'Conjunto de assinaturas', 'Monitor': 'Monitor',
             'ONLINE': 'ATIVO', 'OFFLINE': 'INATIVO', 'Maldet native (live file progress)': 'Maldet nativo (progresso em tempo real)',
             'ClamAV/clamdscan (faster, limited progress)': 'ClamAV/clamdscan (mais rápido, progresso limitado)',
+            'ClamAV updated': 'ClamAV atualizado',
+            'ClamAV already current': 'ClamAV já está atualizado',
+            'ClamAV update failed: ': 'Falha ao atualizar o ClamAV: ',
             'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Scan concluído — ameaças encontradas!',
             'Scan complete - no malware': 'Scan concluído — nenhum malware encontrado',
             'Scan started in background': 'Scan iniciado em segundo plano', 'Monitor started': 'Monitor iniciado',
@@ -1346,7 +1350,7 @@
             h += '<tr><td>LMD Version</td><td>' + escapeHtml(sys.version || 'unknown') + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-ver">Update</button> <button class="btn btn-warning btn-sm" data-action="update-ver-beta">Beta</button></td></tr>';
             h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || 'unknown') + ' (' + escapeHtml(sys.clamav_status || 'missing') + ')</td>';
-            h += '<td><button class="btn btn-primary btn-sm" data-action="update-clamav">Update ClamAV</button></td></tr>';
+            h += '<td><button class="btn btn-primary btn-sm" data-action="update-clamav">' + tr('Update ClamAV') + '</button></td></tr>';
             h += '<tr><td>Signatures</td><td>' + escapeHtml(sys.signature_version || 'unknown') + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-sigs">Update Sigs</button></td></tr>';
             h += '</table></div>';
@@ -1409,11 +1413,11 @@
     function updateClamAv() {
         API.post('/update/clamav', {}).then(function(data) {
             _lastUpdateDetails = data;
-            toast(data.changed ? 'ClamAV updated' : 'ClamAV already current', 'success');
+            toast(data.changed ? tr('ClamAV updated') : tr('ClamAV already current'), 'success');
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
-            toast('ClamAV update failed: ' + err.message, 'error');
+            toast(tr('ClamAV update failed: ') + err.message, 'error');
             Router.navigate('updates');
         });
     }
