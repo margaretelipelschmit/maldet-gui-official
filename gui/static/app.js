@@ -13,17 +13,30 @@
         _fetch: function(path, options) {
             var self = this;
             options = options || {};
+            var method = options.method || 'GET';
+            var timeout = options.timeout || self.timeout;
+            var retries = options.retries === undefined ? (method === 'GET' ? 2 : 0) : options.retries;
             return new Promise(function(resolve, reject) {
                 var xhr = new XMLHttpRequest();
+                var retryScheduled = false;
                 var timer = setTimeout(function() {
+                    retryScheduled = true;
                     xhr.abort();
-                    reject(new Error('Request timed out'));
-                }, self.timeout);
-                xhr.open(options.method || 'GET', self.base + path, true);
+                    if (method === 'GET' && retries > 0) {
+                        setTimeout(function() {
+                            self._fetch(path, { method: method, timeout: timeout, retries: retries - 1 })
+                                .then(resolve).catch(reject);
+                        }, 250);
+                    } else {
+                        reject(new Error('Request timed out'));
+                    }
+                }, timeout);
+                xhr.open(method, self.base + path, true);
                 xhr.setRequestHeader('Accept', 'application/json');
                 if (options.body) xhr.setRequestHeader('Content-Type', 'application/json');
                 xhr.onreadystatechange = function() {
                     if (xhr.readyState !== 4) return;
+                    if (retryScheduled) return;
                     clearTimeout(timer);
                     var data = {};
                     try { data = xhr.responseText ? JSON.parse(xhr.responseText) : {}; }
@@ -32,6 +45,13 @@
                         showAuthScreen(data.setup_required);
                         reject(new Error(data.error || 'Authentication required'));
                     } else if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+                    else if (xhr.status === 0 && method === 'GET' && retries > 0) {
+                        retryScheduled = true;
+                        setTimeout(function() {
+                            self._fetch(path, { method: method, timeout: timeout, retries: retries - 1 })
+                                .then(resolve).catch(reject);
+                        }, 250);
+                    }
                     else {
                         var error = new Error(data.error || ('Request failed (' + xhr.status + ')'));
                         error.data = data;
@@ -41,12 +61,25 @@
 
                 xhr.onerror = function() {
                     clearTimeout(timer);
-                    reject(new Error('Network error'));
+                    if (retryScheduled) return;
+                    if (method === 'GET' && retries > 0) {
+                        retryScheduled = true;
+                        setTimeout(function() {
+                            self._fetch(path, { method: method, timeout: timeout, retries: retries - 1 })
+                                .then(resolve).catch(reject);
+                        }, 250);
+                    } else {
+                        reject(new Error('Network error'));
+                    }
                 };
                 xhr.send(options.body || null);
             });
         },
-        get: function(path) { return this._fetch(path, { method: 'GET' }); },
+        get: function(path, options) {
+            options = options || {};
+            options.method = 'GET';
+            return this._fetch(path, options);
+        },
         post: function(path, body) {
             return this._fetch(path, { method: 'POST', body: JSON.stringify(body || {}) });
         },
