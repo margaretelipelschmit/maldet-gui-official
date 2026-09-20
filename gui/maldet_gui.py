@@ -177,7 +177,7 @@ def run_maldet(args, timeout=30, capture=True):
 def get_clamav_version():
     """Return the installed ClamAV scanner version, if available."""
     for command in ("clamscan", "clamdscan"):
-        path = shutil.which(command)
+        path = find_system_command(command)
         if not path:
             continue
         try:
@@ -190,6 +190,18 @@ def get_clamav_version():
             if output:
                 return output.splitlines()[0]
     return "unknown"
+
+
+def find_system_command(command):
+    """Resolve a system command even when the service has a minimal PATH."""
+    path = shutil.which(command)
+    if path:
+        return path
+    for directory in ("/usr/bin", "/usr/sbin", "/bin", "/sbin"):
+        candidate = os.path.join(directory, command)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return ""
 
 
 def get_clamav_status():
@@ -205,7 +217,7 @@ def get_clamav_status():
 def run_clamav_update(force=False):
     """Update the ClamAV database using the host's freshclam command."""
     before = get_clamav_status()
-    freshclam = shutil.which("freshclam")
+    freshclam = find_system_command("freshclam")
     if not freshclam:
         return 127, {
             "operation": "clamav database update",
