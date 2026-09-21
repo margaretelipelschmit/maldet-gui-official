@@ -438,8 +438,15 @@
                 if (item) {
                     e.preventDefault();
                     self.navigate(item.dataset.page);
+                    document.getElementById('sidebar').classList.remove('open');
                 }
             });
+            var mobileMenu = document.getElementById('mobile-menu-btn');
+            if (mobileMenu) {
+                mobileMenu.addEventListener('click', function() {
+                    document.getElementById('sidebar').classList.toggle('open');
+                });
+            }
             var languageSelect = document.getElementById('language-select');
             if (languageSelect) {
                 languageSelect.value = I18N.lang;

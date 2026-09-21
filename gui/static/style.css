@@ -198,6 +198,18 @@ body {
 .top-bar-actions {
     display: flex;
     gap: 8px;
+    align-items: center;
+}
+
+.top-bar-title {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.mobile-menu-btn {
+    display: none;
+    margin-right: 8px;
 }
 
 .language-picker {
@@ -1340,6 +1352,53 @@ tr:hover td {
 
     #main {
         margin-left: 0;
+        width: 100%;
+    }
+
+    .mobile-menu-btn {
+        display: inline-flex;
+    }
+
+    .top-bar {
+        padding: 12px 14px;
+        gap: 8px;
+    }
+
+    .top-bar-actions {
+        gap: 4px;
+    }
+
+    .language-picker {
+        font-size: 0;
+    }
+
+    .language-picker .form-input {
+        min-width: 92px;
+    }
+
+    .content {
+        padding: 14px;
+    }
+
+    .card {
+        padding: 14px;
+        border-radius: 8px;
+    }
+
+    .card-header {
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .card-header .btn {
+        flex: 0 0 auto;
+    }
+
+    .page-title {
+        font-size: 17px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .grid-4 { grid-template-columns: repeat(2, 1fr); }
@@ -1354,8 +1413,70 @@ tr:hover td {
     .scan-meta {
         gap: 12px;
     }
+
+    .table-scroll {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table-scroll table {
+        min-width: 720px;
+    }
+
+    table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    th, td {
+        padding: 8px 10px;
+    }
+
+    .btn {
+        min-height: 40px;
+    }
+
+    .form-input, .form-select, .form-textarea {
+        max-width: 100%;
+    }
+
+    .config-actions {
+        justify-content: stretch;
+    }
+
+    .config-actions .btn {
+        width: 100%;
+    }
 }
 
 @media (max-width: 1024px) {
     .grid-4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 420px) {
+    .top-bar {
+        align-items: center;
+    }
+
+    .top-bar-actions .btn {
+        padding: 7px 9px;
+    }
+
+    .top-bar-actions #settings-btn {
+        display: none;
+    }
+
+    .grid-4 {
+        grid-template-columns: 1fr;
+    }
+
+    .stat-value {
+        font-size: 24px;
+    }
+
+    .card-title {
+        font-size: 15px;
+    }
 }
