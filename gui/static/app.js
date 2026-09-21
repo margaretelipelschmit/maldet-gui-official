@@ -205,6 +205,7 @@
             'ClamAV updated': 'ClamAV atualizado',
             'ClamAV already current': 'ClamAV já está atualizado',
             'ClamAV update failed: ': 'Falha ao atualizar o ClamAV: ',
+            'Update complete: already current': 'Atualização completa: já atualizado',
             'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Scan concluído — ameaças encontradas!',
             'Scan complete - no malware': 'Scan concluído — nenhum malware encontrado',
             'Scan started in background': 'Scan iniciado em segundo plano', 'Monitor started': 'Monitor iniciado',
@@ -1490,7 +1491,7 @@
     function updateVer(beta) {
         API.post('/update/version', { beta: beta }).then(function(data) {
             _lastUpdateDetails = data;
-            toast(data.changed ? 'Update complete: version changed' : 'Update complete: already current', 'success');
+            toast(data.changed ? 'Update complete: version changed' : tr('Update complete: already current'), 'success');
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
