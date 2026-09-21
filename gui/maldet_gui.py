@@ -173,7 +173,8 @@ def run_maldet(args, timeout=30, capture=True):
 
 def run_detection_test():
     """Download the harmless EICAR test file and scan it with maldet."""
-    url = "http://www.eicar.org/download/eicar.com"
+    # The legacy www.eicar.org/download/eicar.com URL now returns 404.
+    url = "https://secure.eicar.org/eicar.com.txt"
     home = os.path.realpath(os.path.expanduser("~"))
     target = os.path.join(home, "eicar.com")
     wget = find_system_command("wget")
@@ -182,16 +183,24 @@ def run_detection_test():
                      "stdout": "", "stderr": "wget not found in PATH"}
     try:
         download = subprocess.run(
-            [wget, "-P", home, url], capture_output=True, text=True,
+            [wget, "-O", target, url], capture_output=True, text=True,
             timeout=60, start_new_session=True)
     except (OSError, subprocess.SubprocessError) as exc:
         return 1, {"status": "failed", "step": "download", "file": target,
                    "stdout": "", "stderr": str(exc)}
-    if download.returncode != 0 or not os.path.isfile(target):
+    valid_sample = False
+    if os.path.isfile(target):
+        try:
+            with open(target, "rb") as handle:
+                valid_sample = handle.read(68).startswith(
+                    b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!")
+        except OSError:
+            valid_sample = False
+    if download.returncode != 0 or not valid_sample:
         return download.returncode or 1, {
             "status": "failed", "step": "download", "file": target,
             "stdout": download.stdout, "stderr": download.stderr or
-            "Downloaded file was not created",
+            "Downloaded file is missing or is not a valid EICAR test sample",
         }
     out, err, rc = run_maldet(["-a", target], timeout=120)
     return rc, {"status": "completed" if rc == 0 else "failed",

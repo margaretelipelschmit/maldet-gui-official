@@ -1720,7 +1720,7 @@
     function renderDetectionTest() {
         return '<div class="card"><div class="card-header"><span class="card-title">' + tr('Test Detection') + '</span></div>' +
             '<p class="form-help">' + tr('Downloads the harmless EICAR test file to your home directory and scans it with Maldet.') + '</p>' +
-            '<p><code>wget -P ~/ http://www.eicar.org/download/eicar.com</code><br>' +
+            '<p><code>wget -O ~/eicar.com https://secure.eicar.org/eicar.com.txt</code><br>' +
             '<code>maldet -a ~/eicar.com</code></p>' +
             '<button class="btn btn-primary" data-action="test-detection">' + tr('Run Detection Test') + '</button>' +
             '<pre id="detection-test-output" style="display:none;max-height:360px;overflow:auto;white-space:pre-wrap;"></pre></div>';
