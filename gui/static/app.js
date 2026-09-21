@@ -101,7 +101,7 @@
         screen.className = 'auth-screen';
         screen.innerHTML = '<div class="auth-card"><h1>Maldet GUI</h1><p>' +
             (setup ? 'Defina a senha inicial da WebGUI.' : 'Informe a senha da WebGUI.') +
-            '</p><form id="auth-form"><input id="auth-password" type="password" minlength="8" required placeholder="Senha (mínimo 8 caracteres)">' +
+            '</p><form id="auth-form"><input id="auth-password" type="password" minlength="8" required placeholder="' + tr('Password (minimum 8 characters)') + '">' +
             '<button class="btn btn-primary" type="submit">' + (setup ? 'Definir senha' : 'Entrar') + '</button><p id="auth-error" class="auth-error"></p></form></div>';
         (content || document.body).appendChild(screen);
         screen.querySelector('#auth-form').addEventListener('submit', function(e) {
@@ -169,7 +169,7 @@
             'About Maldet': 'Sobre o Maldet',
             'Quarantine': 'Quarentena', 'Reports': 'Relatórios', 'Monitoring': 'Monitoramento',
             'Updates': 'Atualizações', 'Configuration': 'Configuração', 'Test Alerts': 'Testar alertas',
-            'Event Log': 'Log de eventos', 'Ignore Lists': 'Listas de exclusão', 'Maintenance': 'Manutenção',
+            'Logs': 'Logs', 'Event Log': 'Log de eventos', 'Ignore Lists': 'Listas de exclusão', 'Maintenance': 'Manutenção',
             'System Info': 'Informações do sistema', 'Checking...': 'Verificando...',
             'Offline': 'Offline', 'maldet not found': 'maldet não encontrado',
             'Online · Monitor ON': 'Online · Monitor ligado', 'Online · Monitor OFF': 'Online · Monitor desligado',
@@ -204,6 +204,7 @@
             'ClamAV updated': 'ClamAV atualizado',
             'ClamAV already current': 'ClamAV já está atualizado',
             'ClamAV update failed: ': 'Falha ao atualizar o ClamAV: ',
+            'Update complete: already current': 'Atualização completa: já atualizado',
             'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Scan concluído — ameaças encontradas!',
             'Scan complete - no malware': 'Scan concluído — nenhum malware encontrado',
             'Scan started in background': 'Scan iniciado em segundo plano', 'Monitor started': 'Monitor iniciado',
@@ -273,7 +274,54 @@
             'New password must contain at least 8 characters.': 'A nova senha deve ter no mínimo 8 caracteres.',
             'New passwords do not match.': 'As novas senhas não coincidem.',
             'Password changed successfully.': 'Senha alterada com sucesso.',
-            'Password change failed: ': 'Falha ao alterar a senha: '
+            'Password change failed: ': 'Falha ao alterar a senha: ',
+            'Refresh': 'Atualizar', 'Settings': 'Configurações',
+            'maldet not found': 'maldet não encontrado',
+            'System Information': 'Informações do sistema', 'CPU': 'CPU',
+            'cores': 'núcleos', 'ClamAV Status': 'Status do ClamAV',
+            'Maldet Version': 'Versão do Maldet', 'Signature Set': 'Conjunto de assinaturas',
+            'Binary Detection': 'Detecção de binários', 'not found': 'não encontrado',
+            'Installation directory:': 'Diretório de instalação:',
+            'Installer directory:': 'Diretório do instalador:',
+            'Installer:': 'Instalador:', 'Update details': 'Detalhes da atualização',
+            'Status:': 'Status:', 'Operation:': 'Operação:', 'Before:': 'Antes:',
+            'After:': 'Depois:', 'Changed:': 'Alterado:', 'Command output': 'Saída do comando',
+            'No output returned by maldet.': 'O maldet não retornou saída.',
+            'Scan Configuration': 'Configuração do scan', 'Choose a folder or enter an absolute directory path manually.':
+                'Escolha uma pasta ou informe manualmente um caminho absoluto.',
+            'Scans files changed within the selected number of days.':
+                'Escaneia arquivos alterados dentro do número de dias selecionado.',
+            'Choose scan folder': 'Escolher pasta do scan', 'Loading folders...': 'Carregando pastas...',
+            'No subfolders found.': 'Nenhuma subpasta encontrada.',
+            'Cannot read this directory: ': 'Não foi possível ler este diretório: ',
+            'Scan details': 'Detalhes do scan', 'Infection details': 'Detalhes da infecção',
+            'Scan report': 'Relatório do scan', 'Error loading details: ': 'Erro ao carregar detalhes: ',
+            'Error loading report: ': 'Erro ao carregar relatório: ',
+            'Show Report': 'Exibir relatório',
+            'Scan ID': 'ID do scan', 'Path': 'Caminho', 'Started': 'Iniciado',
+            'Completed': 'Concluído', 'Duration': 'Duração', 'Files': 'Arquivos',
+            'Hits': 'Detecções', 'Quarantined': 'Em quarentena', 'Actions': 'Ações',
+            'No completed reports found.': 'Nenhum relatório concluído encontrado.',
+            'scan(s) still active.': 'scan(s) ainda ativo(s).',
+            'scan(s) stopped and resumable.': 'scan(s) parado(s) e retomável(is).',
+            'No detections in this scan': 'Nenhuma detecção neste scan',
+            'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
+            'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
+            'Deleting...': 'Excluindo...', 'Restoring all...': 'Restaurando tudo...',
+            'Quarantining...': 'Colocando em quarentena...', 'Quarantine': 'Quarentenar',
+            'Restore': 'Restaurar', 'Clean': 'Limpar', 'Delete': 'Excluir',
+            'Restore all': 'Restaurar tudo', 'Send Test Alert': 'Enviar alerta de teste',
+            'Sending...': 'Enviando...', 'Saving...': 'Salvando...',
+            'Maintenance complete': 'Manutenção concluída', 'Purge complete': 'Limpeza concluída',
+            'Clear all logs, quarantine, and temp data?':
+                'Limpar todos os logs, a quarentena e os dados temporários?',
+            'Please fill in all password fields.': 'Preencha todos os campos de senha.',
+            'New password must contain at least 8 characters.': 'A nova senha deve ter no mínimo 8 caracteres.',
+            'New passwords do not match.': 'As novas senhas não coincidem.',
+            'Password changed successfully.': 'Senha alterada com sucesso.',
+            'Password (minimum 8 characters)': 'Senha (mínimo 8 caracteres)',
+            'Error': 'Erro', 'Network error': 'Erro de rede',
+            'Request timed out': 'Tempo limite da requisição excedido'
         }
     };
     function tr(text) {
@@ -286,6 +334,14 @@
         while ((node = walker.nextNode())) {
             var value = node.nodeValue.trim();
             if (value && I18N.pt[value]) node.nodeValue = node.nodeValue.replace(value, I18N.pt[value]);
+        }
+        var elements = (root || document.body).querySelectorAll ?
+            (root || document.body).querySelectorAll('[title], [placeholder], [aria-label]') : [];
+        for (var i = 0; i < elements.length; i++) {
+            ['title', 'placeholder', 'aria-label'].forEach(function(attribute) {
+                var value = elements[i].getAttribute(attribute);
+                if (value && I18N.pt[value]) elements[i].setAttribute(attribute, I18N.pt[value]);
+            });
         }
         document.documentElement.lang = 'pt-BR';
     }
@@ -357,7 +413,7 @@
                 dashboard: tr('Dashboard'), scanner: tr('Scanner'), 'scan-management': tr('Scan Management'),
                 quarantine: tr('Quarantine'), reports: tr('Reports'), monitoring: tr('Monitoring'),
                 updates: tr('Updates'), security: tr('Security'), config: tr('Configuration'), alerts: tr('Test Alerts'),
-                logs: tr('Event Log'), ignore: tr('Ignore Lists'), maintenance: tr('Maintenance'), system: tr('System Info'),
+                logs: tr('Logs'), ignore: tr('Ignore Lists'), maintenance: tr('Maintenance'), system: tr('System Info'),
                 about: tr('About Maldet')
             };
             document.getElementById('page-title').textContent = titles[name] || name;
@@ -1064,13 +1120,17 @@
                 tr('Scan Reports') + ' (' + reports.length + ')</span><button class="btn btn-ghost btn-sm" data-action="refresh">🔄</button></div>';
             if (active.length || stopped.length) {
                 h += '<div class="alert alert-warning">' + escapeHtml(
-                    active.length ? active.length + ' scan(s) still active.' :
-                    stopped.length + ' scan(s) stopped and resumable.') + '</div>';
+                    active.length ? active.length + ' ' + tr('scan(s) still active.') :
+                    stopped.length + ' ' + tr('scan(s) stopped and resumable.')) + '</div>';
             }
             if (reports.length === 0) {
-                h += '<p style="padding:12px;color:var(--text-muted);">No completed reports found.</p>';
+                h += '<p style="padding:12px;color:var(--text-muted);">' + tr('No completed reports found.') + '</p>';
             } else {
-                h += '<div class="table-scroll"><table><thead><tr><th>Scan ID</th><th>Path</th><th>Started</th><th>Completed</th><th>Duration</th><th>Files</th><th>Hits</th><th>Quarantined</th><th>Actions</th></tr></thead><tbody>';
+                h += '<div class="table-scroll"><table><thead><tr><th>' + tr('Scan ID') + '</th><th>' +
+                    tr('Path') + '</th><th>' + tr('Started') + '</th><th>' + tr('Completed') +
+                    '</th><th>' + tr('Duration') + '</th><th>' + tr('Files') + '</th><th>' +
+                    tr('Hits') + '</th><th>' + tr('Quarantined') + '</th><th>' + tr('Actions') +
+                    '</th></tr></thead><tbody>';
                 for (var i = 0; i < reports.length; i++) {
                     var r = reports[i];
                     var hits = Number(r.total_hits);
@@ -1082,11 +1142,11 @@
                     h += '<td style="font-size:12px;">' + escapeHtml(r.path || '-') + '</td><td>' + fmtTime(r.started_epoch) + '</td>';
                     h += '<td>' + escapeHtml(r.completed || (r.completed_epoch ? fmtTime(r.completed_epoch) : '-')) + '</td>';
                     h += '<td>' + fmtDuration(r.elapsed_seconds) + '</td><td>' + (Number(r.total_files) || 0) + '</td><td>' + hits + '</td><td>' + quarantined + '</td>';
-                    h += '<td><button class="btn btn-primary btn-sm" data-action="report-details" data-id="' + escapeHtml(scanId) + '">Exibir relatório</button> ';
+                    h += '<td><button class="btn btn-primary btn-sm" data-action="report-details" data-id="' + escapeHtml(scanId) + '">' + tr('Show Report') + '</button> ';
                     h += '<button class="btn btn-ghost btn-sm" data-action="scan-quarantine" data-id="' + escapeHtml(scanId) + '"' +
-                        (hits === 0 ? ' disabled title="No detections in this scan"' : '') + '>Quarantine</button> ';
+                        (hits === 0 ? ' disabled title="' + tr('No detections in this scan') + '"' : '') + '>' + tr('Quarantine') + '</button> ';
                     h += '<button class="btn btn-ghost btn-sm" data-action="scan-restore" data-id="' + escapeHtml(scanId) + '"' +
-                        (quarantined === 0 ? ' disabled title="No quarantined files from this scan"' : '') + '>Restore</button></td></tr>';
+                        (quarantined === 0 ? ' disabled title="' + tr('No quarantined files from this scan') + '"' : '') + '>' + tr('Restore') + '</button></td></tr>';
                 }
                 h += '</tbody></table></div>';
             }
@@ -1428,7 +1488,7 @@
     function updateVer(beta) {
         API.post('/update/version', { beta: beta }).then(function(data) {
             _lastUpdateDetails = data;
-            toast(data.changed ? 'Update complete: version changed' : 'Update complete: already current', 'success');
+            toast(data.changed ? 'Update complete: version changed' : tr('Update complete: already current'), 'success');
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
@@ -1647,10 +1707,16 @@
 
     // ----- Logs -----
     function renderLogs() {
-        return API.get('/logs?lines=50').then(function(data) {
+        return API.get('/logs?lines=200').then(function(data) {
             var logs = data.logs || [];
-            var h = '<div class="card"><div class="card-header"><span class="card-title">Event Log (' + logs.length + ' entries)</span></div>';
-            h += '<div style="max-height:60vh;overflow-y:auto;"><table style="width:100%;"><tbody>';
+            var h = '<div class="card"><div class="card-header"><span class="card-title">Logs</span>' +
+                '<button class="btn btn-ghost btn-sm" data-action="refresh">Refresh</button></div>';
+            h += '<div class="form-help" style="margin-bottom:12px;">' +
+                escapeHtml(data.path || 'event_log') + ' · ' + logs.length + ' ' + tr('entries') + '</div>';
+            h += '<div style="max-height:60vh;overflow:auto;"><table style="width:100%;"><tbody>';
+            if (!logs.length) {
+                h += '<tr><td class="form-help">No log entries found.</td></tr>';
+            }
             for (var i = 0; i < logs.length; i++) {
                 h += '<tr><td style="font-family:monospace;font-size:12px;white-space:pre-wrap;">' + escapeHtml(logs[i]) + '</td></tr>';
             }
