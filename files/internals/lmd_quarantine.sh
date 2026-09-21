@@ -723,6 +723,9 @@ _flush_hit_batch() {
 	local _c
 	_c=$($wc -l < "$_enriched")
 	progress_hits=$(( ${progress_hits:-0} + _c ))
+	# Persist hits immediately so the GUI reflects detections without waiting
+	# for the periodic progress checkpoint.
+	_lifecycle_update_meta "$scanid" "hits" "$progress_hits"
 
 	# Quarantine if enabled
 	if [ "$quarantine_hits" == "1" ] && [ -d "$quardir" ]; then
@@ -840,4 +843,3 @@ quar_hitlist() {
 		exit 1
 	fi
 }
-
