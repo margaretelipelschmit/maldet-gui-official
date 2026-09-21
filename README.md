@@ -139,8 +139,9 @@ RewriteRule /(.*) ws://127.0.0.1:8080/$1 [P,L]
  ``` 
 Click Save and Apply.
 
-Verification: Click Apply Changes in the top right of Webmin/Virtualmin. Apache reloads without syntax errors.3.Configure Proxy Directives (Nginx Alternative):Nginx Configuration.If Virtualmin uses Nginx:Go to Services > Configure Nginx Website > Edit Configuration Files.Inside the server { ... } block for port 443, update or add the location / block:Nginxlocation / {
- ``` 
+Verification: Click Apply Changes in the top right of Webmin/Virtualmin. Apache reloads without syntax errors.3.Configure Proxy Directives (Nginx Alternative):Nginx Configuration.If Virtualmin uses Nginx:Go to Services > Configure Nginx Website > Edit Configuration Files.Inside the server { ... } block for port 443, update or add the location / block:Nginxlocation / 
+ ```
+{
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
