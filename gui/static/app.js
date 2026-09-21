@@ -170,6 +170,14 @@
             'Quarantine': 'Quarentena', 'Reports': 'Relatórios', 'Monitoring': 'Monitoramento',
             'Updates': 'Atualizações', 'Configuration': 'Configuração', 'Test Alerts': 'Testar alertas',
             'Test Detection': 'Testar detecção',
+            'Downloads the harmless EICAR test file to your home directory and scans it with Maldet.':
+                'Baixa o arquivo de teste EICAR inofensivo para seu diretório home e inicia um scan all com o Maldet.',
+            'Run Detection Test': 'Executar teste de detecção',
+            'Downloading EICAR test file and starting Maldet scan...':
+                'Baixando o arquivo EICAR e iniciando o scan all do Maldet...',
+            'Detection test completed': 'Teste de detecção concluído',
+            'Detection test failed: ': 'Falha no teste de detecção: ',
+            'Running...': 'Executando...',
             'Logs': 'Logs', 'Event Log': 'Log de eventos', 'Ignore Lists': 'Listas de exclusão', 'Maintenance': 'Manutenção',
             'System Info': 'Informações do sistema', 'Checking...': 'Verificando...',
             'Offline': 'Offline', 'maldet not found': 'maldet não encontrado',
@@ -1710,11 +1718,11 @@
 
     // ----- Detection test -----
     function renderDetectionTest() {
-        return '<div class="card"><div class="card-header"><span class="card-title">Test Detection</span></div>' +
-            '<p class="form-help">Downloads the harmless EICAR test file to your home directory and scans it with Maldet.</p>' +
+        return '<div class="card"><div class="card-header"><span class="card-title">' + tr('Test Detection') + '</span></div>' +
+            '<p class="form-help">' + tr('Downloads the harmless EICAR test file to your home directory and scans it with Maldet.') + '</p>' +
             '<p><code>wget -P ~/ http://www.eicar.org/download/eicar.com</code><br>' +
             '<code>maldet -a ~/eicar.com</code></p>' +
-            '<button class="btn btn-primary" data-action="test-detection">Run Detection Test</button>' +
+            '<button class="btn btn-primary" data-action="test-detection">' + tr('Run Detection Test') + '</button>' +
             '<pre id="detection-test-output" style="display:none;max-height:360px;overflow:auto;white-space:pre-wrap;"></pre></div>';
     }
 
@@ -1727,19 +1735,19 @@
         }
         if (output) {
             output.style.display = 'block';
-            output.textContent = 'Downloading EICAR test file and starting Maldet scan...';
+            output.textContent = tr('Downloading EICAR test file and starting Maldet scan...');
         }
         API.post('/test-detection', {}).then(function(data) {
             if (output) output.textContent = (data.stdout || '') + (data.stderr ? '\n' + data.stderr : '');
-            toast('Detection test completed', 'success');
+            toast(tr('Detection test completed'), 'success');
         }).catch(function(err) {
             var data = err.data || {};
             if (output) output.textContent = (data.stdout || '') + (data.stderr ? '\n' + data.stderr : '') || err.message;
-            toast('Detection test failed: ' + err.message, 'error', 8000);
+            toast(tr('Detection test failed: ') + err.message, 'error', 8000);
         }).finally(function() {
             if (button) {
                 button.disabled = false;
-                button.textContent = 'Run Detection Test';
+                button.textContent = tr('Run Detection Test');
             }
         });
     }
