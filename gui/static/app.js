@@ -169,7 +169,7 @@
             'About Maldet': 'Sobre o Maldet',
             'Quarantine': 'Quarentena', 'Reports': 'Relatórios', 'Monitoring': 'Monitoramento',
             'Updates': 'Atualizações', 'Configuration': 'Configuração', 'Test Alerts': 'Testar alertas',
-            'Event Log': 'Log de eventos', 'Ignore Lists': 'Listas de exclusão', 'Maintenance': 'Manutenção',
+            'Logs': 'Logs', 'Event Log': 'Log de eventos', 'Ignore Lists': 'Listas de exclusão', 'Maintenance': 'Manutenção',
             'System Info': 'Informações do sistema', 'Checking...': 'Verificando...',
             'Offline': 'Offline', 'maldet not found': 'maldet não encontrado',
             'Online · Monitor ON': 'Online · Monitor ligado', 'Online · Monitor OFF': 'Online · Monitor desligado',
@@ -404,7 +404,7 @@
                 dashboard: tr('Dashboard'), scanner: tr('Scanner'), 'scan-management': tr('Scan Management'),
                 quarantine: tr('Quarantine'), reports: tr('Reports'), monitoring: tr('Monitoring'),
                 updates: tr('Updates'), security: tr('Security'), config: tr('Configuration'), alerts: tr('Test Alerts'),
-                logs: tr('Event Log'), ignore: tr('Ignore Lists'), maintenance: tr('Maintenance'), system: tr('System Info'),
+                logs: tr('Logs'), ignore: tr('Ignore Lists'), maintenance: tr('Maintenance'), system: tr('System Info'),
                 about: tr('About Maldet')
             };
             document.getElementById('page-title').textContent = titles[name] || name;
@@ -1694,10 +1694,16 @@
 
     // ----- Logs -----
     function renderLogs() {
-        return API.get('/logs?lines=50').then(function(data) {
+        return API.get('/logs?lines=200').then(function(data) {
             var logs = data.logs || [];
-            var h = '<div class="card"><div class="card-header"><span class="card-title">Event Log (' + logs.length + ' entries)</span></div>';
-            h += '<div style="max-height:60vh;overflow-y:auto;"><table style="width:100%;"><tbody>';
+            var h = '<div class="card"><div class="card-header"><span class="card-title">Logs</span>' +
+                '<button class="btn btn-ghost btn-sm" data-action="refresh">Refresh</button></div>';
+            h += '<div class="form-help" style="margin-bottom:12px;">' +
+                escapeHtml(data.path || 'event_log') + ' · ' + logs.length + ' ' + tr('entries') + '</div>';
+            h += '<div style="max-height:60vh;overflow:auto;"><table style="width:100%;"><tbody>';
+            if (!logs.length) {
+                h += '<tr><td class="form-help">No log entries found.</td></tr>';
+            }
             for (var i = 0; i < logs.length; i++) {
                 h += '<tr><td style="font-family:monospace;font-size:12px;white-space:pre-wrap;">' + escapeHtml(logs[i]) + '</td></tr>';
             }
