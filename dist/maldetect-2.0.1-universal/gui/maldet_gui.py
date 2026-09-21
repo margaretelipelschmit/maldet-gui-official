@@ -725,15 +725,15 @@ def read_event_log(lines=200):
     """Read the last N lines of the event log."""
     log_file = os.path.join(get_log_dir(), EVENT_LOG)
     if not os.path.isfile(log_file):
-        return []
+        return [], log_file
     try:
         result = subprocess.run(
             ["tail", "-n", str(lines), log_file],
             capture_output=True, text=True, timeout=10
         )
-        return [l for l in result.stdout.strip().split("\n") if l]
+        return [l for l in result.stdout.splitlines() if l], log_file
     except Exception:
-        return []
+        return [], log_file
 
 
 def read_ignore_file(filepath):
@@ -936,8 +936,17 @@ class MaldetAPI:
 
         # ---- Logs ----
         if route == "/api/logs" and method == "GET":
-            lines = int(query.get("lines", ["200"])[0])
-            return 200, {"logs": read_event_log(lines), "total": 0}
+            try:
+                lines = max(1, min(1000, int(query.get("lines", ["200"])[0])))
+            except (TypeError, ValueError):
+                return 400, {"error": "Invalid lines parameter"}
+            logs, log_file = read_event_log(lines)
+            return 200, {
+                "logs": logs,
+                "total": len(logs),
+                "lines": lines,
+                "path": log_file,
+            }
 
         # ---- Monitor ----
         if route == "/api/monitor" and method == "POST":
