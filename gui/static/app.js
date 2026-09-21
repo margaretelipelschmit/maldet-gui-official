@@ -169,6 +169,7 @@
             'About Maldet': 'Sobre o Maldet',
             'Quarantine': 'Quarentena', 'Reports': 'Relatórios', 'Monitoring': 'Monitoramento',
             'Updates': 'Atualizações', 'Configuration': 'Configuração', 'Test Alerts': 'Testar alertas',
+            'Test Detection': 'Testar detecção',
             'Logs': 'Logs', 'Event Log': 'Log de eventos', 'Ignore Lists': 'Listas de exclusão', 'Maintenance': 'Manutenção',
             'System Info': 'Informações do sistema', 'Checking...': 'Verificando...',
             'Offline': 'Offline', 'maldet not found': 'maldet não encontrado',
@@ -404,6 +405,7 @@
                 dashboard: tr('Dashboard'), scanner: tr('Scanner'), 'scan-management': tr('Scan Management'),
                 quarantine: tr('Quarantine'), reports: tr('Reports'), monitoring: tr('Monitoring'),
                 updates: tr('Updates'), security: tr('Security'), config: tr('Configuration'), alerts: tr('Test Alerts'),
+                detection: tr('Test Detection'),
                 logs: tr('Logs'), ignore: tr('Ignore Lists'), maintenance: tr('Maintenance'), system: tr('System Info'),
                 about: tr('About Maldet')
             };
@@ -488,6 +490,7 @@
                 else if (action === 'change-password') changePassword();
                 else if (action === 'security-change-password') securityChangePassword();
                 else if (action === 'send-alert') sendAlert();
+                else if (action === 'test-detection') runDetectionTest();
                 else if (action === 'ignore-tab') showIgnoreTab(el.getAttribute('data-name'));
                 else if (action === 'save-ignore') saveIgnore(el.getAttribute('data-name'), el);
                 else if (action === 'scanner-tab') switchScannerTab(el.getAttribute('data-tab'));
@@ -1692,6 +1695,42 @@
         });
     }
 
+    // ----- Detection test -----
+    function renderDetectionTest() {
+        return '<div class="card"><div class="card-header"><span class="card-title">Test Detection</span></div>' +
+            '<p class="form-help">Downloads the harmless EICAR test file to your home directory and scans it with Maldet.</p>' +
+            '<p><code>wget -P ~/ http://www.eicar.org/download/eicar.com</code><br>' +
+            '<code>maldet -a ~/eicar.com</code></p>' +
+            '<button class="btn btn-primary" data-action="test-detection">Run Detection Test</button>' +
+            '<pre id="detection-test-output" style="display:none;max-height:360px;overflow:auto;white-space:pre-wrap;"></pre></div>';
+    }
+
+    function runDetectionTest() {
+        var button = document.querySelector('[data-action="test-detection"]');
+        var output = document.getElementById('detection-test-output');
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Running...';
+        }
+        if (output) {
+            output.style.display = 'block';
+            output.textContent = 'Downloading EICAR test file and starting Maldet scan...';
+        }
+        API.post('/test-detection', {}).then(function(data) {
+            if (output) output.textContent = (data.stdout || '') + (data.stderr ? '\n' + data.stderr : '');
+            toast('Detection test completed', 'success');
+        }).catch(function(err) {
+            var data = err.data || {};
+            if (output) output.textContent = (data.stdout || '') + (data.stderr ? '\n' + data.stderr : '') || err.message;
+            toast('Detection test failed: ' + err.message, 'error', 8000);
+        }).finally(function() {
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Run Detection Test';
+            }
+        });
+    }
+
     // ----- Logs -----
     function renderLogs() {
         return API.get('/logs?lines=200').then(function(data) {
@@ -1822,6 +1861,7 @@
     Router.register('security', renderSecurityPage);
     Router.register('config', renderConfig);
     Router.register('alerts', renderAlerts);
+    Router.register('detection', renderDetectionTest);
     Router.register('logs', renderLogs);
     Router.register('ignore', renderIgnore);
     Router.register('maintenance', renderMaintenance);
