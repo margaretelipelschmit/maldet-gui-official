@@ -298,6 +298,14 @@
             'Scan report': 'Relatório do scan', 'Error loading details: ': 'Erro ao carregar detalhes: ',
             'Error loading report: ': 'Erro ao carregar relatório: ',
             'Show Report': 'Exibir relatório',
+            'Scan ID': 'ID do scan', 'Path': 'Caminho', 'Started': 'Iniciado',
+            'Completed': 'Concluído', 'Duration': 'Duração', 'Files': 'Arquivos',
+            'Hits': 'Detecções', 'Quarantined': 'Em quarentena', 'Actions': 'Ações',
+            'No completed reports found.': 'Nenhum relatório concluído encontrado.',
+            'scan(s) still active.': 'scan(s) ainda ativo(s).',
+            'scan(s) stopped and resumable.': 'scan(s) parado(s) e retomável(is).',
+            'No detections in this scan': 'Nenhuma detecção neste scan',
+            'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
             'Deleting...': 'Excluindo...', 'Restoring all...': 'Restaurando tudo...',
             'Quarantining...': 'Colocando em quarentena...', 'Quarantine': 'Quarentenar',
@@ -1114,13 +1122,17 @@
                 tr('Scan Reports') + ' (' + reports.length + ')</span><button class="btn btn-ghost btn-sm" data-action="refresh">🔄</button></div>';
             if (active.length || stopped.length) {
                 h += '<div class="alert alert-warning">' + escapeHtml(
-                    active.length ? active.length + ' scan(s) still active.' :
-                    stopped.length + ' scan(s) stopped and resumable.') + '</div>';
+                    active.length ? active.length + ' ' + tr('scan(s) still active.') :
+                    stopped.length + ' ' + tr('scan(s) stopped and resumable.')) + '</div>';
             }
             if (reports.length === 0) {
-                h += '<p style="padding:12px;color:var(--text-muted);">No completed reports found.</p>';
+                h += '<p style="padding:12px;color:var(--text-muted);">' + tr('No completed reports found.') + '</p>';
             } else {
-                h += '<div class="table-scroll"><table><thead><tr><th>Scan ID</th><th>Path</th><th>Started</th><th>Completed</th><th>Duration</th><th>Files</th><th>Hits</th><th>Quarantined</th><th>Actions</th></tr></thead><tbody>';
+                h += '<div class="table-scroll"><table><thead><tr><th>' + tr('Scan ID') + '</th><th>' +
+                    tr('Path') + '</th><th>' + tr('Started') + '</th><th>' + tr('Completed') +
+                    '</th><th>' + tr('Duration') + '</th><th>' + tr('Files') + '</th><th>' +
+                    tr('Hits') + '</th><th>' + tr('Quarantined') + '</th><th>' + tr('Actions') +
+                    '</th></tr></thead><tbody>';
                 for (var i = 0; i < reports.length; i++) {
                     var r = reports[i];
                     var hits = Number(r.total_hits);
@@ -1134,9 +1146,9 @@
                     h += '<td>' + fmtDuration(r.elapsed_seconds) + '</td><td>' + (Number(r.total_files) || 0) + '</td><td>' + hits + '</td><td>' + quarantined + '</td>';
                     h += '<td><button class="btn btn-primary btn-sm" data-action="report-details" data-id="' + escapeHtml(scanId) + '">' + tr('Show Report') + '</button> ';
                     h += '<button class="btn btn-ghost btn-sm" data-action="scan-quarantine" data-id="' + escapeHtml(scanId) + '"' +
-                        (hits === 0 ? ' disabled title="No detections in this scan"' : '') + '>Quarantine</button> ';
+                        (hits === 0 ? ' disabled title="' + tr('No detections in this scan') + '"' : '') + '>' + tr('Quarantine') + '</button> ';
                     h += '<button class="btn btn-ghost btn-sm" data-action="scan-restore" data-id="' + escapeHtml(scanId) + '"' +
-                        (quarantined === 0 ? ' disabled title="No quarantined files from this scan"' : '') + '>Restore</button></td></tr>';
+                        (quarantined === 0 ? ' disabled title="' + tr('No quarantined files from this scan') + '"' : '') + '>' + tr('Restore') + '</button></td></tr>';
                 }
                 h += '</tbody></table></div>';
             }
