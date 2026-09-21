@@ -171,43 +171,6 @@ def run_maldet(args, timeout=30, capture=True):
         return "", str(e), 1
 
 
-def run_detection_test():
-    """Download the harmless EICAR test file and scan it with maldet."""
-    # The legacy www.eicar.org/download/eicar.com URL now returns 404.
-    url = "https://secure.eicar.org/eicar.com.txt"
-    home = os.path.realpath(os.path.expanduser("~"))
-    target = os.path.join(home, "eicar.com")
-    wget = find_system_command("wget")
-    if not wget:
-        return 127, {"status": "failed", "step": "download", "file": target,
-                     "stdout": "", "stderr": "wget not found in PATH"}
-    try:
-        download = subprocess.run(
-            [wget, "-O", target, url], capture_output=True, text=True,
-            timeout=60, start_new_session=True)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return 1, {"status": "failed", "step": "download", "file": target,
-                   "stdout": "", "stderr": str(exc)}
-    valid_sample = False
-    if os.path.isfile(target):
-        try:
-            with open(target, "rb") as handle:
-                valid_sample = handle.read(68).startswith(
-                    b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!")
-        except OSError:
-            valid_sample = False
-    if download.returncode != 0 or not valid_sample:
-        return download.returncode or 1, {
-            "status": "failed", "step": "download", "file": target,
-            "stdout": download.stdout, "stderr": download.stderr or
-            "Downloaded file is missing or is not a valid EICAR test sample",
-        }
-    out, err, rc = run_maldet(["-a", target], timeout=120)
-    return rc, {"status": "completed" if rc == 0 else "failed",
-                "step": "scan", "file": target, "stdout": out,
-                "stderr": err, "returncode": rc}
-
-
 # ---------------------------------------------------------------------------
 # Utility: system info
 # ---------------------------------------------------------------------------
@@ -1050,10 +1013,6 @@ class MaldetAPI:
             data = body or {}
             return MaldetAPI._test_alert(
                 data.get("type", "scan"), data.get("channel", "email"))
-
-        if route == "/api/test-detection" and method == "POST":
-            return_code, payload = run_detection_test()
-            return (200 if return_code == 0 else 400), payload
 
         # ---- Purge & maintenance ----
         if route == "/api/purge" and method == "POST":
