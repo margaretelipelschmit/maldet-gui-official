@@ -173,10 +173,15 @@ def run_maldet(args, timeout=30, capture=True):
 
 
 TERMINAL_COMMANDS = {
+    "date": ("/bin/date", set()),
     "df": ("/bin/df", {"-h"}),
     "free": ("/usr/bin/free", {"-h"}),
+    "hostname": ("/usr/bin/hostname", set()),
+    "id": ("/usr/bin/id", set()),
     "uptime": ("/usr/bin/uptime", set()),
     "uname": ("/bin/uname", {"-a"}),
+    "whoami": ("/usr/bin/whoami", set()),
+    "ps": ("/usr/bin/ps", {"-eo"}),
     "maldet": (get_maldet_path(), {"--version", "-L", "--format"}),
     "systemctl": ("/usr/bin/systemctl", {"status", "restart"}),
     "journalctl": ("/usr/bin/journalctl", {"-u", "-n", "--no-pager"}),
@@ -248,6 +253,9 @@ def run_terminal_command(command):
     elif executable == "maldet":
         if args not in [["--version"], ["-L"], ["--format", "json", "-L"]]:
             return 403, {"error": "Only Maldet version and active-scan commands are allowed"}
+    elif executable == "ps":
+        if args != ["-eo", "pid,ppid,stat,etime,cmd"]:
+            return 403, {"error": "Only the process status view is allowed"}
     elif any(arg not in allowed_args for arg in args):
         return 403, {"error": "Command arguments are not allowed"}
     try:
