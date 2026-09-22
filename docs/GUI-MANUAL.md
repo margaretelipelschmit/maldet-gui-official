@@ -247,10 +247,47 @@ administração exige root.
 
 ## 9. Desinstalação
 
-```bash
+```
+bash
 sudo bash /usr/local/maldetect/uninstall.sh
 ```
 
+Web Interface setup a reverse proxy
+To set up a reverse proxy for the maldet GUI using Virtualmin (Webmin), you can configure an existing virtual server domain or sub-domain to forward requests to 127.0.0.1:8080. Virtualmin will manage Apache or Nginx depending on your server stack, along with Let's Encrypt SSL certificates.Step 1: Ensure Apache/Nginx Proxy Modules are EnabledBefore configuring Virtualmin, ensure the proxy modules are active on your Webmin system.For Apache:
+```
+Bash
+
+sudo a2enmod proxy proxy_http proxy_wstunnel headers ssl
+```
+sudo systemctl restart apache2
+For Nginx: Virtualmin handles Nginx proxying using built-in modules; no extra enabling step is required.Step 2: Configure the Proxy in Virtualmin UI1.Navigate to Virtual Server Settings:Virtualmin GUI.Log in to Virtualmin (https://your-server-ip:10000).Select the domain or sub-domain you want to use from the top-left dropdown (e.g., maldet.yourdomain.com).Go to Server Configuration > Edit Web site Options (or Website Redirects).Verification: The domain management options load for your chosen virtual server.2.Configure Proxy Pass / Proxy Directives:Apache Configuration.If Virtualmin uses Apache:Go to Services > Configure Web Server > Edit Directives.Add the following lines inside the <VirtualHost *:443> block (or <VirtualHost *:80> if SSL is not active yet):Apache# Enable proxy pass to backend service
+```
+ProxyPreserveHost On
+ProxyPass / http://127.0.0.1:8080/
+ProxyPassReverse / http://127.0.0.1:8080/
+
+# WebSocket support (needed by GUI)
+RewriteEngine On
+RewriteCond %{HTTP:Upgrade} =websocket [NC]
+RewriteRule /(.*) ws://127.0.0.1:8080/$1 [P,L]
+Click Save and Apply.
+```
+Verification: Click Apply Changes in the top right of Webmin/Virtualmin. Apache reloads without syntax errors.3.Configure Proxy Directives (Nginx Alternative):Nginx Configuration.If Virtualmin uses Nginx:Go to Services > Configure Nginx Website > Edit Configuration Files.Inside the server { ... } block for port 443, update or add the location / block:Nginxlocation /
+```
+{
+   proxy_pass http://127.0.0.1:8080;
+   proxy_set_header Host $host;
+   proxy_set_header X-Real-IP $remote_addr;
+   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   proxy_set_header X-Forwarded-Proto $scheme;
+
+   # WebSocket support
+   proxy_http_version 1.1;
+   proxy_set_header Upgrade $http_upgrade;
+   proxy_set_header Connection "upgrade";
+}
+```
+Click Save and Apply Nginx Configuration.Verification: Nginx reloads successfully without configuration warnings.4.Configure SSL via Let's Encrypt:Virtualmin Security.Go to Server Configuration > SSL Certificate.Select the Let's Encrypt tab.Click Request Certificate.Verification: Virtualmin issues a certificate, and visiting https://maldet.yourdomain.com displays a secure connection.5.Enable Password Protection:Virtualmin Access Control.Since maldet runs with administrative privileges, protect access via Virtualmin's GUI:Go to Services > Protected Directories.Click Add protection for directory.Set directory path to / and set up your allowed usernames and passwords.Verification: Visiting the domain prompts for HTTP Basic Authentication before loading the GUI.
 O desinstalador remove os launchers, atalhos e arquivos instalados conforme o
 escopo normal do pacote. Preserve previamente relatórios ou configurações que
 precisem ser mantidos.
