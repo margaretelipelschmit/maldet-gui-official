@@ -174,6 +174,9 @@
             'Only approved administrative commands are available.':
                 'Somente comandos administrativos aprovados estão disponíveis.',
             'Command is required': 'O comando é obrigatório',
+            'Terminal command allowlist': 'Lista de comandos permitidos do terminal',
+            'Allowed commands': 'Comandos permitidos', 'Allowed services': 'Serviços permitidos',
+            'Save allowlist': 'Salvar lista permitida', 'Terminal allowlist saved': 'Lista do terminal salva',
             'Logs': 'Logs', 'Event Log': 'Log de eventos', 'Ignore Lists': 'Listas de exclusão', 'Maintenance': 'Manutenção',
             'System Info': 'Informações do sistema', 'Checking...': 'Verificando...',
             'Offline': 'Offline', 'maldet not found': 'maldet não encontrado',
@@ -513,6 +516,7 @@
                 else if (action === 'terminal-open') openTerminal();
                 else if (action === 'terminal-close') closeTerminal();
                 else if (action === 'terminal-run') runTerminalCommand();
+                else if (action === 'terminal-save-allowlist') saveTerminalAllowlist(el);
                 else if (action === 'ignore-tab') showIgnoreTab(el.getAttribute('data-name'));
                 else if (action === 'save-ignore') saveIgnore(el.getAttribute('data-name'), el);
                 else if (action === 'scanner-tab') switchScannerTab(el.getAttribute('data-tab'));
@@ -1723,10 +1727,47 @@
 
     // ----- Administrative terminal -----
     function renderTerminal() {
-        return '<div class="card"><div class="card-header"><span class="card-title">' +
-            tr('Admin Terminal') + '</span><button class="btn btn-primary btn-sm" data-action="terminal-open">' +
-            tr('Open terminal') + '</button></div><p class="form-help">' +
-            tr('Only approved administrative commands are available.') + '</p></div>';
+        return API.get('/terminal/allowlist').then(function(data) {
+            var h = '<div class="card"><div class="card-header"><span class="card-title">' +
+                tr('Admin Terminal') + '</span><button class="btn btn-primary btn-sm" data-action="terminal-open">' +
+                tr('Open terminal') + '</button></div><p class="form-help">' +
+                tr('Only approved administrative commands are available.') + '</p></div>';
+            h += '<div class="card"><div class="card-header"><span class="card-title">' +
+                tr('Terminal command allowlist') + '</span></div>';
+            h += '<p class="form-help">' + tr('Only approved administrative commands are available.') + '</p>';
+            h += terminalAllowlistGroup('Allowed commands', data.commands || []);
+            h += terminalAllowlistGroup('Allowed services', data.services || []);
+            h += '<button class="btn btn-primary" data-action="terminal-save-allowlist">' +
+                tr('Save allowlist') + '</button></div>';
+            return h;
+        });
+    }
+
+    function terminalAllowlistGroup(title, items) {
+        var h = '<fieldset class="terminal-allowlist-group"><legend>' + tr(title) + '</legend>';
+        items.forEach(function(item) {
+            h += '<label class="checkbox-row"><input type="checkbox" class="terminal-allow-item" data-name="' +
+                escapeHtml(item.name) + '"' + (item.enabled ? ' checked' : '') + '> ' +
+                escapeHtml(item.name) + '</label>';
+        });
+        return h + '</fieldset>';
+    }
+
+    function saveTerminalAllowlist(button) {
+        var commands = [], services = [];
+        document.querySelectorAll('.terminal-allow-item').forEach(function(input) {
+            if (!input.checked) return;
+            if (input.dataset.name.indexOf('.service') !== -1) services.push(input.dataset.name);
+            else commands.push(input.dataset.name);
+        });
+        if (button) button.disabled = true;
+        API.put('/terminal/allowlist', { commands: commands, services: services }).then(function() {
+            toast(tr('Terminal allowlist saved'), 'success');
+        }).catch(function(err) {
+            toast(err.message, 'error');
+        }).finally(function() {
+            if (button) button.disabled = false;
+        });
     }
 
     function openTerminal() {

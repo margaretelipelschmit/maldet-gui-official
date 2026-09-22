@@ -1227,6 +1227,21 @@ tr:hover td {
     font: 12px/1.5 "Fira Code", "Courier New", monospace;
 }
 
+.terminal-allowlist-group {
+    display: grid;
+    gap: 8px;
+    margin: 0 0 16px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.terminal-allowlist-group legend {
+    padding: 0 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
 /* ===== Tabs ===== */
 
 .tabs {

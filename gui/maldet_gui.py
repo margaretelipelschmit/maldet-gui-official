@@ -184,6 +184,44 @@ TERMINAL_COMMANDS = {
 TERMINAL_SERVICES = {
     "maldet-gui.service", "clamav-daemon.service", "clamav-freshclam.service",
 }
+TERMINAL_ALLOWLIST_FILE = "gui.terminal.allowlist.json"
+
+
+def terminal_allowlist_path():
+    return os.path.join(get_base_dir(), TERMINAL_ALLOWLIST_FILE)
+
+
+def load_terminal_allowlist():
+    enabled_commands = set(TERMINAL_COMMANDS)
+    enabled_services = set(TERMINAL_SERVICES)
+    path = terminal_allowlist_path()
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        enabled_commands &= set(data.get("commands", []))
+        enabled_services &= set(data.get("services", []))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return enabled_commands, enabled_services
+
+
+def save_terminal_allowlist(data):
+    commands = sorted(set(data.get("commands", [])) & set(TERMINAL_COMMANDS))
+    services = sorted(set(data.get("services", [])) & set(TERMINAL_SERVICES))
+    path = terminal_allowlist_path()
+    temp_path = path + ".tmp"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump({"commands": commands, "services": services}, handle, indent=2)
+            handle.write("\n")
+        os.replace(temp_path, path)
+    except OSError as exc:
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+        return False, str(exc)
+    return True, ""
 
 
 def run_terminal_command(command):
@@ -195,15 +233,16 @@ def run_terminal_command(command):
     if not argv or any(token in command for token in ("|", ">", "<", ";", "&", "`", "$")):
         return 400, {"error": "Only a single approved command is allowed"}
     executable = argv[0]
-    if executable not in TERMINAL_COMMANDS:
+    enabled_commands, enabled_services = load_terminal_allowlist()
+    if executable not in enabled_commands:
         return 403, {"error": "Command is not allowed"}
     path, allowed_args = TERMINAL_COMMANDS[executable]
     args = argv[1:]
     if executable == "systemctl":
-        if len(args) != 2 or args[0] not in allowed_args or args[1] not in TERMINAL_SERVICES:
+        if len(args) != 2 or args[0] not in allowed_args or args[1] not in enabled_services:
             return 403, {"error": "Only service status/restart commands are allowed"}
     elif executable == "journalctl":
-        if len(args) != 5 or args[0] != "-u" or args[1] not in TERMINAL_SERVICES or \
+        if len(args) != 5 or args[0] != "-u" or args[1] not in enabled_services or \
                 args[2:] != ["-n", "100", "--no-pager"]:
             return 403, {"error": "Only the last 100 lines of a service journal are allowed"}
     elif executable == "maldet":
@@ -890,6 +929,21 @@ class MaldetAPI:
 
         if route == "/api/terminal" and method == "POST":
             return run_terminal_command((body or {}).get("command", ""))
+
+        if route == "/api/terminal/allowlist":
+            if method == "GET":
+                commands, services = load_terminal_allowlist()
+                return 200, {
+                    "commands": [{"name": name, "enabled": name in commands}
+                                 for name in sorted(TERMINAL_COMMANDS)],
+                    "services": [{"name": name, "enabled": name in services}
+                                 for name in sorted(TERMINAL_SERVICES)],
+                }
+            if method == "PUT":
+                ok, error = save_terminal_allowlist(body or {})
+                return (200 if ok else 400), (
+                    {"message": "Terminal allowlist saved"} if ok
+                    else {"error": error})
 
         if route == "/api/version":
             info = get_system_info()
