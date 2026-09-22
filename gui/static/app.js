@@ -169,6 +169,11 @@
             'About Maldet': 'Sobre o Maldet',
             'Quarantine': 'Quarentena', 'Reports': 'Relatórios', 'Monitoring': 'Monitoramento',
             'Updates': 'Atualizações', 'Configuration': 'Configuração', 'Test Alerts': 'Testar alertas',
+            'Admin Terminal': 'Terminal administrativo',
+            'Open terminal': 'Abrir terminal', 'Run command': 'Executar comando',
+            'Only approved administrative commands are available.':
+                'Somente comandos administrativos aprovados estão disponíveis.',
+            'Command is required': 'O comando é obrigatório',
             'Logs': 'Logs', 'Event Log': 'Log de eventos', 'Ignore Lists': 'Listas de exclusão', 'Maintenance': 'Manutenção',
             'System Info': 'Informações do sistema', 'Checking...': 'Verificando...',
             'Offline': 'Offline', 'maldet not found': 'maldet não encontrado',
@@ -413,6 +418,7 @@
                 dashboard: tr('Dashboard'), scanner: tr('Scanner'), 'scan-management': tr('Scan Management'),
                 quarantine: tr('Quarantine'), reports: tr('Reports'), monitoring: tr('Monitoring'),
                 updates: tr('Updates'), security: tr('Security'), config: tr('Configuration'), alerts: tr('Test Alerts'),
+                terminal: tr('Admin Terminal'),
                 logs: tr('Logs'), ignore: tr('Ignore Lists'), maintenance: tr('Maintenance'), system: tr('System Info'),
                 about: tr('About Maldet')
             };
@@ -504,6 +510,9 @@
                 else if (action === 'change-password') changePassword();
                 else if (action === 'security-change-password') securityChangePassword();
                 else if (action === 'send-alert') sendAlert();
+                else if (action === 'terminal-open') openTerminal();
+                else if (action === 'terminal-close') closeTerminal();
+                else if (action === 'terminal-run') runTerminalCommand();
                 else if (action === 'ignore-tab') showIgnoreTab(el.getAttribute('data-name'));
                 else if (action === 'save-ignore') saveIgnore(el.getAttribute('data-name'), el);
                 else if (action === 'scanner-tab') switchScannerTab(el.getAttribute('data-tab'));
@@ -1712,6 +1721,56 @@
         });
     }
 
+    // ----- Administrative terminal -----
+    function renderTerminal() {
+        return '<div class="card"><div class="card-header"><span class="card-title">' +
+            tr('Admin Terminal') + '</span><button class="btn btn-primary btn-sm" data-action="terminal-open">' +
+            tr('Open terminal') + '</button></div><p class="form-help">' +
+            tr('Only approved administrative commands are available.') + '</p></div>';
+    }
+
+    function openTerminal() {
+        closeTerminal();
+        var modal = document.createElement('div');
+        modal.id = 'terminal-modal';
+        modal.className = 'modal-backdrop';
+        modal.innerHTML = '<div class="modal terminal-modal"><div class="modal-header"><span class="modal-title">' +
+            tr('Admin Terminal') + '</span><button class="modal-close" data-action="terminal-close">×</button></div>' +
+            '<div class="modal-body"><form id="terminal-form"><div class="terminal-input-row"><span>#</span>' +
+            '<input id="terminal-command" class="form-input" autocomplete="off" placeholder="df -h">' +
+            '<button class="btn btn-primary" type="submit">' + tr('Run command') + '</button></div></form>' +
+            '<pre id="terminal-output" class="terminal-output"></pre></div></div>';
+        document.body.appendChild(modal);
+        modal.querySelector('#terminal-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+            runTerminalCommand();
+        });
+        modal.querySelector('#terminal-command').focus();
+    }
+
+    function closeTerminal() {
+        var modal = document.getElementById('terminal-modal');
+        if (modal) modal.remove();
+    }
+
+    function runTerminalCommand() {
+        var input = document.getElementById('terminal-command');
+        var output = document.getElementById('terminal-output');
+        var command = input ? input.value.trim() : '';
+        if (!command) {
+            toast(tr('Command is required'), 'error');
+            return;
+        }
+        if (output) output.textContent = '$ ' + command + '\n\nRunning...';
+        API.post('/terminal', { command: command }).then(function(data) {
+            if (output) output.textContent = '$ ' + command + '\n\n' + (data.stdout || '') +
+                (data.stderr ? '\n' + data.stderr : '') + '\n[exit ' + data.returncode + ']';
+        }).catch(function(err) {
+            var data = err.data || {};
+            if (output) output.textContent = '$ ' + command + '\n\n' + (data.error || err.message);
+        });
+    }
+
     // ----- Logs -----
     function renderLogs() {
         return API.get('/logs?lines=200').then(function(data) {
@@ -1842,6 +1901,7 @@
     Router.register('security', renderSecurityPage);
     Router.register('config', renderConfig);
     Router.register('alerts', renderAlerts);
+    Router.register('terminal', renderTerminal);
     Router.register('logs', renderLogs);
     Router.register('ignore', renderIgnore);
     Router.register('maintenance', renderMaintenance);

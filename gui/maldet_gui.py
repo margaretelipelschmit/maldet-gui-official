@@ -25,6 +25,7 @@ import pwd
 import hashlib
 import secrets
 import tempfile
+import shlex
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -169,6 +170,57 @@ def run_maldet(args, timeout=30, capture=True):
         return "", "Command timed out after " + str(timeout), 124
     except Exception as e:
         return "", str(e), 1
+
+
+TERMINAL_COMMANDS = {
+    "df": ("/bin/df", {"-h"}),
+    "free": ("/usr/bin/free", {"-h"}),
+    "uptime": ("/usr/bin/uptime", set()),
+    "uname": ("/bin/uname", {"-a"}),
+    "maldet": (get_maldet_path(), {"--version", "-L", "--format"}),
+    "systemctl": ("/usr/bin/systemctl", {"status", "restart"}),
+    "journalctl": ("/usr/bin/journalctl", {"-u", "-n", "--no-pager"}),
+}
+TERMINAL_SERVICES = {
+    "maldet-gui.service", "clamav-daemon.service", "clamav-freshclam.service",
+}
+
+
+def run_terminal_command(command):
+    """Run one non-shell command from the administrative terminal allowlist."""
+    try:
+        argv = shlex.split(command or "")
+    except ValueError as exc:
+        return 400, {"error": "Invalid command syntax: " + str(exc)}
+    if not argv or any(token in command for token in ("|", ">", "<", ";", "&", "`", "$")):
+        return 400, {"error": "Only a single approved command is allowed"}
+    executable = argv[0]
+    if executable not in TERMINAL_COMMANDS:
+        return 403, {"error": "Command is not allowed"}
+    path, allowed_args = TERMINAL_COMMANDS[executable]
+    args = argv[1:]
+    if executable == "systemctl":
+        if len(args) != 2 or args[0] not in allowed_args or args[1] not in TERMINAL_SERVICES:
+            return 403, {"error": "Only service status/restart commands are allowed"}
+    elif executable == "journalctl":
+        if len(args) != 5 or args[0] != "-u" or args[1] not in TERMINAL_SERVICES or \
+                args[2:] != ["-n", "100", "--no-pager"]:
+            return 403, {"error": "Only the last 100 lines of a service journal are allowed"}
+    elif executable == "maldet":
+        if args not in [["--version"], ["-L"], ["--format", "json", "-L"]]:
+            return 403, {"error": "Only Maldet version and active-scan commands are allowed"}
+    elif any(arg not in allowed_args for arg in args):
+        return 403, {"error": "Command arguments are not allowed"}
+    try:
+        result = subprocess.run(
+            [path] + args, capture_output=True, text=True, timeout=30,
+            start_new_session=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 500, {"error": str(exc)}
+    return 200, {
+        "command": command, "returncode": result.returncode,
+        "stdout": result.stdout, "stderr": result.stderr,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -835,6 +887,9 @@ class MaldetAPI:
         # ---- System / version ----
         if route == "/api/system":
             return 200, {"system": get_system_info()}
+
+        if route == "/api/terminal" and method == "POST":
+            return run_terminal_command((body or {}).get("command", ""))
 
         if route == "/api/version":
             info = get_system_info()
