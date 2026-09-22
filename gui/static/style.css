@@ -1193,55 +1193,6 @@ tr:hover td {
     justify-content: flex-end;
 }
 
-.terminal-modal {
-    width: min(94vw, 900px);
-}
-
-.terminal-input-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.terminal-input-row > span {
-    color: var(--success);
-    font-family: monospace;
-}
-
-.terminal-input-row .form-input {
-    flex: 1;
-}
-
-.terminal-output {
-    min-height: 260px;
-    max-height: 55vh;
-    margin-top: 14px;
-    padding: 12px;
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: var(--text-primary);
-    background: #09090d;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font: 12px/1.5 "Fira Code", "Courier New", monospace;
-}
-
-.terminal-allowlist-group {
-    display: grid;
-    gap: 8px;
-    margin: 0 0 16px;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-}
-
-.terminal-allowlist-group legend {
-    padding: 0 6px;
-    color: var(--text-secondary);
-    font-size: 13px;
-}
-
 /* ===== Tabs ===== */
 
 .tabs {
@@ -1485,20 +1436,6 @@ tr:hover td {
 
     .btn {
         min-height: 40px;
-    }
-
-    .terminal-input-row {
-        align-items: stretch;
-        flex-wrap: wrap;
-    }
-
-    .terminal-input-row .form-input {
-        min-width: 0;
-        flex-basis: calc(100% - 24px);
-    }
-
-    .terminal-input-row .btn {
-        width: 100%;
     }
 
     .form-input, .form-select, .form-textarea {
