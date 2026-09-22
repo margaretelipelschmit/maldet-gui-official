@@ -220,3 +220,7 @@ GNU GPL v2 — same license as Linux Malware Detect.
 
 - [Linux Malware Detect GitHub](https://github.com/rfxn/linux-malware-detect)
 - [Maldet Documentation](https://github.com/rfxn/linux-malware-detect/blob/master/README.md)
+
+## Developed:
+https://bithostel.com.br
+suporte@bithostel.com.br
