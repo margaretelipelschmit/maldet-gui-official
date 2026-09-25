@@ -123,7 +123,7 @@ d8c9d8ae5bc3f6618afc166b4deca88dd9d26eaafd64fc57b199e077d3bdc9fc  ./gui/maldet_s
 0d67cd9c8f43d8d3ccfe313aac42a2dfac0f04fff02a3209a36cd57c2f9dfb4e  ./gui/open_gui.sh
 8b9a034c52f305e1259caef225d9ceca2c7ea2183f1058368cea58659b607c0e  ./gui/README.md
 d97245ae921350bfbdcbe4da8b53878226333a6b6345268a521145b3c19489c3  ./gui/requirements.txt
-25f0e7d8f0ae856ce4c1a2504ec1570f4f87c20a76650f83c3f144a41c7a58b3  ./gui/static/app.js
+eff3b859c29ece64e611f7dabf353f4876c3ef7f520381b7c67534550a523f7a  ./gui/static/app.js
 09f8c8b3bcfd8027f6eb302ef8d73536152942481b225dc9e605f63de5134836  ./gui/static/style.css
 5f8d5855dcf4369c03843281f3db6b5d70f5432d756facbf5e7ccfc91ead9b73  ./gui/templates/index.html
 ccd2632e75054c759d673e9f1f21cfe6c9a37f5fb591040ee9850044fad6a9fb  ./gui/templates/test.html

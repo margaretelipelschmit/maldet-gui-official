@@ -353,6 +353,8 @@
             'No completed reports found.': 'Nenhum relatório concluído encontrado.',
             'scan(s) still active.': 'scan(s) ainda ativo(s).',
             'scan(s) stopped and resumable.': 'scan(s) parado(s) e retomável(is).',
+            'Stopped': 'Parado', 'Resume': 'Retomar', 'Discard': 'Descartar',
+            'Resuming...': 'Retomando...', 'Discarding...': 'Descartando...',
             'No detections in this scan': 'Nenhuma detecção neste scan',
             'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
@@ -534,6 +536,8 @@
                 else if (action === 'scan-stop') stopScan(el.getAttribute('data-id'));
                 else if (action === 'scan-quarantine') scanAction(el.getAttribute('data-id'), 'quarantine');
                 else if (action === 'scan-restore') scanAction(el.getAttribute('data-id'), 'restore');
+                else if (action === 'scan-continue') resumeScan(el.getAttribute('data-id'));
+                else if (action === 'scan-kill') discardScan(el.getAttribute('data-id'));
                 else if (action === 'quarantine-details') openQuarantineDetails(el.getAttribute('data-file'));
                 else if (action === 'quarantine-details-close') closeQuarantineDetails();
                 else if (action === 'quarantine-restore') restoreQuarantineFile(el.getAttribute('data-file'));
@@ -1192,10 +1196,25 @@
             var stopped = data.stopped || data.stopped_scans || [];
             var h = '<div class="card"><div class="card-header"><span class="card-title">' +
                 tr('Scan Reports') + ' (' + reports.length + ')</span><button class="btn btn-ghost btn-sm" data-action="refresh">🔄</button></div>';
-            if (active.length || stopped.length) {
-                h += '<div class="alert alert-warning">' + escapeHtml(
-                    active.length ? active.length + ' ' + tr('scan(s) still active.') :
-                    stopped.length + ' ' + tr('scan(s) stopped and resumable.')) + '</div>';
+            if (active.length) {
+                h += '<div class="alert alert-warning">' + escapeHtml(active.length + ' ' + tr('scan(s) still active.')) + '</div>';
+            }
+            if (stopped.length) {
+                h += '<div class="alert alert-warning">' + escapeHtml(stopped.length + ' ' + tr('scan(s) stopped and resumable.')) + '</div>';
+                h += '<div class="table-scroll"><table><thead><tr><th>' + tr('Scan ID') + '</th><th>' +
+                    tr('Path') + '</th><th>' + tr('Started') + '</th><th>' + tr('Stopped') + '</th><th>' +
+                    tr('Files') + '</th><th>' + tr('Hits') + '</th><th>' + tr('Actions') + '</th></tr></thead><tbody>';
+                for (var si = 0; si < stopped.length; si++) {
+                    var st = stopped[si];
+                    var stScanId = String(st.scan_id || '');
+                    h += '<tr><td><code>' + escapeHtml(stScanId || '-') + '</code></td>';
+                    h += '<td style="font-size:12px;">' + escapeHtml(st.path || '-') + '</td><td>' + fmtTime(st.started_epoch) + '</td>';
+                    h += '<td>' + escapeHtml(st.stopped || (st.stopped_epoch ? fmtTime(st.stopped_epoch) : '-')) + '</td>';
+                    h += '<td>' + (Number(st.total_files) || 0) + '</td><td>' + (Number(st.total_hits) || 0) + '</td>';
+                    h += '<td><button class="btn btn-primary btn-sm" data-action="scan-continue" data-id="' + escapeHtml(stScanId) + '">' + tr('Resume') + '</button> ';
+                    h += '<button class="btn btn-danger btn-sm" data-action="scan-kill" data-id="' + escapeHtml(stScanId) + '">' + tr('Discard') + '</button></td></tr>';
+                }
+                h += '</tbody></table></div>';
             }
             if (reports.length === 0) {
                 h += '<p style="padding:12px;color:var(--text-muted);">' + tr('No completed reports found.') + '</p>';
@@ -1229,6 +1248,14 @@
         });
     }
 
+    var SCAN_ACTION_LABELS = {
+        quarantine: { idle: 'Quarantine', working: 'Quarantining...' },
+        restore: { idle: 'Restore', working: 'Restoring...' },
+        stop: { idle: 'Stop', working: 'Stopping...' },
+        continue: { idle: 'Resume', working: 'Resuming...' },
+        kill: { idle: 'Discard', working: 'Discarding...' }
+    };
+
     function scanAction(id, action) {
         var button = null;
         var actionButtons = document.querySelectorAll('[data-action="scan-' + action + '"]');
@@ -1238,21 +1265,23 @@
                 break;
             }
         }
+        var labels = SCAN_ACTION_LABELS[action] || { idle: 'Retry', working: 'Working...' };
         if ((action === 'quarantine' || action === 'restore') &&
             !confirm((action === 'quarantine' ? 'Quarantine' : 'Restore') + ' all detected files from scan ' + id + '?')) {
             return;
         }
         if (button) {
             button.disabled = true;
-            button.textContent = action === 'quarantine' ? 'Quarantining...' :
-                (action === 'restore' ? 'Restoring...' : (action === 'stop' ? 'Stopping...' : 'Working...'));
+            button.textContent = tr(labels.working);
         }
         API.post('/scan/' + encodeURIComponent(id) + '/' + action, {}).then(function(r) {
             if (r.returncode !== undefined && r.returncode !== 0 && r.returncode !== 2) {
                 throw new Error(r.stderr || r.stdout || (action + ' failed'));
             }
             toast((action === 'quarantine' ? 'Files quarantined' :
-                (action === 'restore' ? 'Files restored' : action + ' complete')) + ' for scan ' + id, 'success');
+                (action === 'restore' ? 'Files restored' :
+                (action === 'continue' ? 'Scan resumed' :
+                (action === 'kill' ? 'Scan discarded' : action + ' complete')))) + ' for scan ' + id, 'success');
             if (Router.currentPage === 'scan-management') {
                 refreshScanManagementView();
             }
@@ -1263,10 +1292,18 @@
             toast('Error: ' + e.message, 'error');
             if (button) {
                 button.disabled = false;
-                button.textContent = action === 'quarantine' ? 'Quarantine' :
-                    (action === 'restore' ? 'Restore' : 'Stop');
+                button.textContent = tr(labels.idle);
             }
         });
+    }
+
+    function resumeScan(id) {
+        scanAction(id, 'continue');
+    }
+
+    function discardScan(id) {
+        if (!confirm('Discard the checkpoint for scan ' + id + '? This cannot be undone and the scan will no longer be resumable.')) return;
+        scanAction(id, 'kill');
     }
 
     function stopScan(id) {
