@@ -164,7 +164,8 @@ sig_import_csig_url=""
 scan_hashtype="auto"
 
 # Number of parallel workers for native scan passes (MD5, SHA-256, HEX, and CSIG).
-# Auto detection uses 2 workers per CPU core, up to 8.
+# Auto detection always uses half of the CPU cores (min 1, max 8) so the
+# native engine never saturates the whole host by default.
 # [ auto = default, 1 = single-threaded, max = 8 ]
 scan_workers="auto"
 

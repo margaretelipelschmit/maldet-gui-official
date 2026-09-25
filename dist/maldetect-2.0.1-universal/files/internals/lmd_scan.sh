@@ -489,7 +489,10 @@ _resolve_worker_count() {
 	local _count="${scan_workers:-auto}"
 	if [ "$_count" == "auto" ] || [ "$_count" -le 0 ] 2>/dev/null; then  # auto or 0 (legacy)
 		_count=$(nproc 2>/dev/null || grep -E -c '^processor' /proc/cpuinfo 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
-		_count=$((_count * 2))
+		# Always use at most half of the available CPU cores so the scan
+		# never saturates the whole host, regardless of core count.
+		_count=$((_count / 2))
+		if [ "$_count" -lt 1 ]; then _count=1; fi
 		if [ "$_count" -gt 8 ]; then _count=8; fi
 	fi
 	if [ "$_count" -gt 8 ]; then _count=8; fi

@@ -467,3 +467,42 @@ _spawn_mock_clamd() {
     rm -f /tmp/lmd-test-scanproc-busy.flag
     wait "$scan_pid" 2>/dev/null
 }
+
+@test "_resolve_worker_count auto-detection always uses half of the CPU cores, not double" {
+    set +eu
+    trap - ERR
+    source "$LMD_INSTALL/internals/internals.conf"
+    source "$LMD_INSTALL/conf.maldet"
+    source "$LMD_INSTALL/internals/lmd_scan.sh"
+    unset scan_workers
+
+    nproc() { echo "8"; }
+    run _resolve_worker_count 999999
+    assert_output "4"
+}
+
+@test "_resolve_worker_count auto-detection never goes below 1 worker on single-core hosts" {
+    set +eu
+    trap - ERR
+    source "$LMD_INSTALL/internals/internals.conf"
+    source "$LMD_INSTALL/conf.maldet"
+    source "$LMD_INSTALL/internals/lmd_scan.sh"
+    unset scan_workers
+
+    nproc() { echo "1"; }
+    run _resolve_worker_count 999999
+    assert_output "1"
+}
+
+@test "_resolve_worker_count auto-detection caps half-of-cores at 8 on large hosts" {
+    set +eu
+    trap - ERR
+    source "$LMD_INSTALL/internals/internals.conf"
+    source "$LMD_INSTALL/conf.maldet"
+    source "$LMD_INSTALL/internals/lmd_scan.sh"
+    unset scan_workers
+
+    nproc() { echo "64"; }
+    run _resolve_worker_count 999999
+    assert_output "8"
+}
