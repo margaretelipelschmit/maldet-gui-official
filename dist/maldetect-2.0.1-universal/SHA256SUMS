@@ -109,7 +109,7 @@ d81bab61550effc8851a15c4091fbdfecd48a98dea4cba818cff9b45bb985d26  ./files/intern
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./files/maldet.1
 9dd69a7ba36be4ed1e744f969c01acacb2d548e17abd55ebc4848d6e31605986  ./files/maldet-sshfs-scan
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./files/monitor_paths
-b1a62cc0cb411b65d9599f7bf536b03398ca54eed052594caa80b0e458f61be2  ./files/service/maldet-gui.service
+ce32a8c84375fc50d4fc02b734baaa32bd05c9e9f277e6c90a2a7d6d7106212e  ./files/service/maldet-gui.service
 eb300420ce915d8b855bb3bc820d5163959149b08e134fce030cfa5e420a37c1  ./files/service/maldet-gui.sh
 4220ba84d00841b230f16c5f8d9e6bcbb8f75572bb320e890c38f75ee92f2400  ./files/service/maldet.service
 d51c8491295fc40de3dc8b80644ed3db4e84d6be9583ee81d384eae7eafd43fb  ./files/service/maldet.sh
@@ -118,7 +118,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./files/uninst
 fe840f52fb5578d3f77eb497115eb02c6036601c3a53e60df7995c7276baa77a  ./files/VERSION
 a49251587d041f0a7146fe86732ee8708cfbc3bcfbc5b3aae5875249c11d0131  ./files/VERSION.hash
 177d61f85342c6528f842fa6426272bc1186865155666ef10607e0f53fdc4d00  ./gui/launch.sh
-012bd74191c1790646b3eabb3c71e9beb5f499a757790e3c203c8855ff0ecae0  ./gui/maldet_gui.py
+e5c83c6ecd5e1c57da7ed93f6f37787058edeb52a8d2bab78e227a8175f0f4b2  ./gui/maldet_gui.py
 d8c9d8ae5bc3f6618afc166b4deca88dd9d26eaafd64fc57b199e077d3bdc9fc  ./gui/maldet_systray.sh
 0d67cd9c8f43d8d3ccfe313aac42a2dfac0f04fff02a3209a36cd57c2f9dfb4e  ./gui/open_gui.sh
 8b9a034c52f305e1259caef225d9ceca2c7ea2183f1058368cea58659b607c0e  ./gui/README.md

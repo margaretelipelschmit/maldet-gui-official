@@ -13,6 +13,12 @@ WorkingDirectory=/usr/local/maldetect/gui
 ExecStart=/usr/bin/env python3 /usr/local/maldetect/gui/maldet_gui.py --host ${MALDET_GUI_HOST} --port ${MALDET_GUI_PORT} --base-dir /usr/local/maldetect --maldet-bin ${MALDET_BIN}
 Restart=on-failure
 RestartSec=5
+# Only signal the GUI process itself on stop/restart. The default
+# KillMode=control-group would also SIGTERM/SIGKILL any detached
+# "maldet -b" scan process spawned by the GUI (subprocess children stay in
+# the service cgroup even with a new session), orphaning in-progress scans
+# as stale/dead-PID entries every time the GUI service is restarted.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target
