@@ -1145,15 +1145,6 @@ tr:hover td {
     font-size: 11px;
 }
 
-.scan-current-file {
-    margin-top: 3px;
-    overflow: hidden;
-    color: var(--text-muted);
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .scan-files-count {
     margin-top: 3px;
     color: var(--text-muted);

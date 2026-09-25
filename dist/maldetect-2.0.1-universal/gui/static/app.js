@@ -953,11 +953,9 @@
                 var progressStarted = total > 0 && (scanClockStarted || scanned > 0);
                 var percent = progressStarted ? Math.min(100, Math.max(0, (scanned / total) * 100)) : 0;
                 var progressText = progressStarted && total > 0 ? Math.round(percent) + '%' : '';
-                var currentFile = progress.current_file || s.current_file || '';
-                var currentFileHtml = progressStarted && currentFile ? '<div class="scan-current-file" title="' + escapeHtml(currentFile) + '">Current: ' + escapeHtml(currentFile) + '</div>' : '';
                 var progressBar = progressStarted ? '<div class="scan-progress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.round(percent) + '">' +
                     '<div class="scan-progress-track"><div class="scan-progress-fill" style="width:' + percent.toFixed(1) + '%;"></div></div>' +
-                    '<span class="scan-progress-label">' + progressText + '</span>' + currentFileHtml + '</div>' :
+                    '<span class="scan-progress-label">' + progressText + '</span></div>' :
                     '<span class="form-help">Waiting for first file...</span>';
                 var filesText = progressStarted ? (scanned + ' / ' + total) : 'Waiting for scan start';
                 h += '<tr><td>' + escapeHtml(s.scan_id) + '</td><td style="font-size:12px;max-width:260px;word-break:break-all;">' + escapeHtml(s.path || '-') + '</td><td>' + escapeHtml(s.state) + '</td><td>' + escapeHtml(s.engine || '-') + '</td>';
