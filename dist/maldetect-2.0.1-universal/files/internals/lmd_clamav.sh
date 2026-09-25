@@ -261,12 +261,40 @@ clamselector() {
 	fi
 }
 
+# _clamd_prune_dead_holders holdersdir — remove any holder marker whose
+# scanid-embedded PID (the numeric suffix after the last '.') is no longer
+# alive. Self-heals cases where a scan's own cleanup never ran (e.g. a race
+# between two scans finishing within the same flock window, a SIGKILL that
+# bypassed the trap, or a crash) — without this, a single stale marker would
+# permanently hold clamd throttled since the refcount would never reach zero
+# again on its own.
+_clamd_prune_dead_holders() {
+	local _holdersdir="$1" _marker _pid
+	[ -d "$_holdersdir" ] || return 0
+	for _marker in "$_holdersdir"/*; do
+		[ -e "$_marker" ] || continue
+		_pid="${_marker##*.}"
+		if [ -z "$_pid" ] || ! [ "$_pid" -gt 0 ] 2>/dev/null || ! kill -0 "$_pid" 2>/dev/null; then
+			command rm -f "$_marker" 2>/dev/null
+		fi
+	done
+}
+
 # _clamd_apply_throttle scanid — deprioritize the shared clamd DAEMON for the
 # duration of maldet-triggered scans. scan_cpunice/scan_ionice/scan_cpulimit
 # only wrap the clamdscan CLIENT process maldet spawns (via $nice_command);
 # the actual file-scanning CPU work happens inside the pre-existing clamd
 # daemon over its socket, which is otherwise completely unthrottled and can
 # peg CPU cores regardless of those settings.
+#
+# renice alone only affects scheduling PRIORITY: on a host with idle cores it
+# does nothing to cap clamd's absolute usage, so it can still show 100% of a
+# core in top/htop during a scan even while correctly niced. scan_clamd_cpulimit
+# (percentage of one core, independent from scan_cpulimit which governs the
+# clamdscan/clamscan/find/yara CLIENT processes) is what actually caps clamd's
+# real usage, via periodic SIGSTOP/SIGCONT cycling done by the cpulimit binary
+# — defaults to 50 so this is capped out of the box even if unset in an older
+# conf.maldet, but an explicit scan_clamd_cpulimit="0" disables the cap.
 #
 # Tracked via one marker file per holding scanid (not a bare counter) so that
 # releasing the same scanid's hold twice — e.g. once from a killed scan's own
@@ -289,21 +317,50 @@ _clamd_apply_throttle() {
 	local _clamd_pid
 	_clamd_pid=$(pgrep -x clamd 2>/dev/null | head -n1)
 	[ -n "$_clamd_pid" ] || return 0
+	local _clamd_cpulimit="${scan_clamd_cpulimit:-50}"
 
 	(
-		flock -x -w 5 201 || exit 0
+		flock -x -w 15 201 || exit 0
 		command mkdir -p "$_holdersdir" 2>/dev/null
+		_clamd_prune_dead_holders "$_holdersdir"
 		if [ -z "$(command ls -A "$_holdersdir" 2>/dev/null)" ]; then
-			# First holder — capture original priority and apply the throttle
+			# First holder — capture original priority and apply the throttle.
+			# Defensively reap any cpulimit watcher orphaned by a prior crashed
+			# or ungracefully-killed scan before starting a fresh one; running
+			# two concurrent watchers against the same PID is what caused
+			# clamd to be left permanently stuck in a stopped (T) state during
+			# testing (each watcher independently SIGSTOP/SIGCONT's clamd with
+			# no coordination between them).
+			pkill -f "cpulimit .*-p $_clamd_pid( |$)" >/dev/null 2>&1
+			kill -CONT "$_clamd_pid" >/dev/null 2>&1  # in case an orphan left it stopped
 			local _orig_nice
 			_orig_nice=$(ps -o ni= -p "$_clamd_pid" 2>/dev/null | tr -d ' ')
 			[ -n "$_orig_nice" ] || _orig_nice=0
 			echo "$_orig_nice" > "$_nicefile"
 			if [ "$scan_cpunice" ] && [ "$scan_cpunice" -gt "$_orig_nice" ] 2>/dev/null; then
-				renice -n "$scan_cpunice" -p "$_clamd_pid" >/dev/null 2>&1
+				# Absolute priority: renice's "-n" flag is relative under
+				# POSIXLY_CORRECT, so pass the value bare (unambiguously
+				# absolute per renice(1)) instead of "-n $scan_cpunice".
+				renice "$scan_cpunice" -p "$_clamd_pid" >/dev/null 2>&1
 			fi
-			if [ -n "$cpulimit" ] && [ -f "$cpulimit" ] && [ "$scan_cpulimit" -gt 0 ] 2>/dev/null; then
-				"$cpulimit" -p "$_clamd_pid" -l "$scan_cpulimit" -z -b >/dev/null 2>&1 &
+			if [ -n "$cpulimit" ] && [ -f "$cpulimit" ] && [ "$_clamd_cpulimit" -gt 0 ] 2>/dev/null; then
+				# No "-b": that flag makes cpulimit double-fork/daemonize,
+				# so "$!" below would capture the short-lived forking
+				# parent's PID, not the real long-running watcher — leaving
+				# an untracked, unkillable orphan once the scan ends. Instead
+				# we background it ourselves via "&", which keeps "$!"
+				# pointing at the actual watcher process.
+				#
+				# "201>&-" closes the inherited flock fd in this long-lived
+				# child before it execs: without it, cpulimit keeps fd 201
+				# (the exclusive lock on $_lockfile) open for its entire
+				# lifetime — a lock is held per open file description, not
+				# per process, so every future apply/restore call would
+				# block on flock until this watcher exits, deadlocking
+				# cleanup indefinitely (observed in testing: markers and
+				# orphaned cpulimit processes piled up forever because
+				# _clamd_restore_throttle could never re-acquire the lock).
+				"$cpulimit" -p "$_clamd_pid" -l "$_clamd_cpulimit" -z >/dev/null 2>&1 201>&- &
 				disown 2>/dev/null
 				echo "$!" > "$_cpulimitpidfile"
 			fi
@@ -328,20 +385,29 @@ _clamd_restore_throttle() {
 	[ -d "$_holdersdir" ] || return 0
 
 	(
-		flock -x -w 5 201 || exit 0
+		flock -x -w 15 201 || exit 0
 		command rm -f "$_holdersdir/$_scanid" 2>/dev/null
+		_clamd_prune_dead_holders "$_holdersdir"
 		if [ -z "$(command ls -A "$_holdersdir" 2>/dev/null)" ]; then
+			local _orig_nice _clamd_pid
+			_clamd_pid=$(pgrep -x clamd 2>/dev/null | head -n1)
 			if [ -f "$_cpulimitpidfile" ]; then
 				local _cpid
 				_cpid=$(cat "$_cpulimitpidfile" 2>/dev/null)
 				[ -n "$_cpid" ] && kill "$_cpid" 2>/dev/null
 				command rm -f "$_cpulimitpidfile"
 			fi
-			local _orig_nice _clamd_pid
+			# Belt-and-suspenders: also reap by command-line match, in case
+			# the tracked PID was stale, and unconditionally SIGCONT clamd —
+			# harmless if it's already running, but guarantees it can never
+			# be left permanently stopped by a watcher that exited mid-cycle.
+			[ -n "$_clamd_pid" ] && pkill -f "cpulimit .*-p $_clamd_pid( |$)" >/dev/null 2>&1
+			[ -n "$_clamd_pid" ] && kill -CONT "$_clamd_pid" >/dev/null 2>&1
 			_orig_nice=$(cat "$_nicefile" 2>/dev/null)
-			_clamd_pid=$(pgrep -x clamd 2>/dev/null | head -n1)
 			if [ -n "$_clamd_pid" ] && [ -n "$_orig_nice" ] && command -v renice >/dev/null 2>&1; then
-				renice -n "$_orig_nice" -p "$_clamd_pid" >/dev/null 2>&1
+				# Absolute priority: see the matching note in
+				# _clamd_apply_throttle for why "-n" is intentionally omitted.
+				renice "$_orig_nice" -p "$_clamd_pid" >/dev/null 2>&1
 			fi
 			command rm -f "$_nicefile" 2>/dev/null
 			command rmdir "$_holdersdir" 2>/dev/null  # safe: no-op if concurrently repopulated

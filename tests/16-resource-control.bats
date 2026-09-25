@@ -136,6 +136,170 @@ _spawn_mock_clamd() {
     rm -rf "$mockbin" "$tmpdir"
 }
 
+@test "scan_clamd_cpulimit defaults to 50 and is independent from scan_cpulimit" {
+    source "$LMD_INSTALL/conf.maldet"
+    [ "${scan_clamd_cpulimit:-50}" = "50" ]
+    # scan_cpulimit (client processes) stays disabled by default — the new
+    # daemon-only setting must not change that existing semantic.
+    [ "$scan_cpulimit" = "0" ]
+}
+
+@test "_clamd_apply_throttle uses renice absolute value, not relative" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    if pgrep -x clamd >/dev/null 2>&1; then
+        skip "a real clamd is already running on this host — would collide with mock"
+    fi
+    _source_lmd_stack_resource
+
+    read -r mockbin mock_pid < <(_spawn_mock_clamd)
+    tmpdir=$(mktemp -d)
+    clamd=1
+    scan_clamd_remote=""
+    scan_cpunice=19
+    scan_cpulimit=0
+    scan_clamd_cpulimit=0
+
+    # renice(1)'s "-n" flag is absolute-or-relative depending on
+    # POSIXLY_CORRECT (relative when set) — force that env var to make sure
+    # the code path is exercised the same way a strict-POSIX shell would run
+    # it, and assert the result still lands exactly on the configured value
+    # rather than being added on top of clamd's starting nice level.
+    POSIXLY_CORRECT=1 _clamd_apply_throttle "unit-test-scan-renice-absolute"
+    run bash -c "ps -o ni= -p $mock_pid | tr -d ' '"
+    assert_output "19"
+
+    _clamd_restore_throttle "unit-test-scan-renice-absolute"
+    kill "$mock_pid" 2>/dev/null
+    rm -rf "$mockbin" "$tmpdir"
+}
+
+@test "_clamd_apply_throttle's cpulimit watcher PID is real and killable (no -b double-fork orphan)" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    command -v cpulimit >/dev/null 2>&1 || skip "cpulimit not available"
+    if pgrep -x clamd >/dev/null 2>&1; then
+        skip "a real clamd is already running on this host — would collide with mock"
+    fi
+    _source_lmd_stack_resource
+
+    read -r mockbin mock_pid < <(_spawn_mock_clamd)
+    tmpdir=$(mktemp -d)
+    clamd=1
+    scan_clamd_remote=""
+    scan_cpunice=19
+    scan_cpulimit=0
+    scan_clamd_cpulimit=50
+    cpulimit=$(command -v cpulimit)
+
+    _clamd_apply_throttle "unit-test-scan-cpulimit-pid"
+    local recorded_pid
+    recorded_pid=$(cat "$tmpdir/.clamd_throttle.cpulimit.pid")
+
+    # The recorded PID must be a live cpulimit process actually watching our
+    # mock clamd PID — "-b" would daemonize and orphan the real watcher
+    # under a different, untracked PID, leaving this check failing.
+    run bash -c "ps -o comm= -p $recorded_pid"
+    assert_output --partial "cpulimit"
+    run bash -c "kill -0 $recorded_pid 2>/dev/null && echo alive"
+    assert_output "alive"
+
+    # Killing the recorded PID must actually stop the watcher (proves it's
+    # the real process, not a stale/forked-away PID).
+    kill "$recorded_pid" 2>/dev/null
+    sleep 0.3
+    run bash -c "kill -0 $recorded_pid 2>/dev/null && echo alive || echo dead"
+    assert_output "dead"
+
+    _clamd_restore_throttle "unit-test-scan-cpulimit-pid"
+    kill "$mock_pid" 2>/dev/null
+    rm -rf "$mockbin" "$tmpdir"
+}
+
+@test "_clamd_apply_throttle's backgrounded cpulimit does not inherit/leak the flock fd" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    command -v cpulimit >/dev/null 2>&1 || skip "cpulimit not available"
+    if pgrep -x clamd >/dev/null 2>&1; then
+        skip "a real clamd is already running on this host — would collide with mock"
+    fi
+    _source_lmd_stack_resource
+
+    read -r mockbin mock_pid < <(_spawn_mock_clamd)
+    tmpdir=$(mktemp -d)
+    clamd=1
+    scan_clamd_remote=""
+    scan_cpunice=19
+    scan_cpulimit=0
+    scan_clamd_cpulimit=50
+    cpulimit=$(command -v cpulimit)
+
+    _clamd_apply_throttle "unit-test-scan-fd-leak"
+    _clamd_restore_throttle "unit-test-scan-fd-leak"
+
+    # If the cpulimit child inherited the flock fd (201), it would hold the
+    # exclusive lock open for its whole lifetime even after this restore
+    # call's own subshell exited — deadlocking every future apply/restore
+    # call. Confirm no process (in particular the just-spawned cpulimit
+    # watcher, which restore should have already killed) still holds an
+    # open fd on the lockfile.
+    run bash -c "fuser \"$tmpdir/.clamd_throttle.lock\" 2>&1"
+    refute_output --partial "cpulimit"
+
+    # And a fresh apply/restore cycle must complete promptly (would hang up
+    # to the flock timeout if the lock were still leaked/held).
+    run timeout 5 bash -c "source '$LMD_INSTALL/internals/lmd.lib.sh'; true"
+    _clamd_apply_throttle "unit-test-scan-fd-leak-2"
+    run bash -c "ps -o ni= -p $mock_pid | tr -d ' '"
+    assert_output "19"
+    _clamd_restore_throttle "unit-test-scan-fd-leak-2"
+
+    kill "$mock_pid" 2>/dev/null
+    rm -rf "$mockbin" "$tmpdir"
+}
+
+@test "_clamd_prune_dead_holders self-heals a stale marker left by a dead PID" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    if pgrep -x clamd >/dev/null 2>&1; then
+        skip "a real clamd is already running on this host — would collide with mock"
+    fi
+    _source_lmd_stack_resource
+
+    read -r mockbin mock_pid < <(_spawn_mock_clamd)
+    tmpdir=$(mktemp -d)
+    clamd=1
+    scan_clamd_remote=""
+    scan_cpunice=19
+    scan_cpulimit=0
+    scan_clamd_cpulimit=0
+
+    local orig_nice
+    orig_nice=$(ps -o ni= -p "$mock_pid" | tr -d ' ')
+
+    # Simulate a stale holder marker left behind by a scan whose own cleanup
+    # never ran (e.g. a lock-timeout/crash), embedding a definitely-dead PID
+    # in the scanid, matching the real "date-time.PID" format.
+    mkdir -p "$tmpdir/.clamd_throttle.holders"
+    local dead_pid=999999
+    while kill -0 "$dead_pid" 2>/dev/null; do dead_pid=$((dead_pid - 1)); done
+    : > "$tmpdir/.clamd_throttle.holders/260925-0000.$dead_pid"
+
+    # A brand-new scan applying the throttle must prune the dead marker as
+    # part of becoming (what it thinks is) the first real holder — otherwise
+    # the stale marker permanently blocks restore from ever seeing an empty
+    # holders dir again.
+    _clamd_apply_throttle "unit-test-scan-prune"
+    run bash -c "ls '$tmpdir/.clamd_throttle.holders/'"
+    refute_output --partial "$dead_pid"
+    assert_output --partial "unit-test-scan-prune"
+
+    _clamd_restore_throttle "unit-test-scan-prune"
+    run bash -c "ls -A '$tmpdir/.clamd_throttle.holders/' 2>/dev/null"
+    assert_output ""
+    run bash -c "ps -o ni= -p $mock_pid | tr -d ' '"
+    assert_output "$orig_nice"
+
+    kill "$mock_pid" 2>/dev/null
+    rm -rf "$mockbin" "$tmpdir"
+}
+
 @test "_clamd_restore_throttle only restores once every concurrent holder has released" {
     command -v renice >/dev/null 2>&1 || skip "renice not available"
     if pgrep -x clamd >/dev/null 2>&1; then

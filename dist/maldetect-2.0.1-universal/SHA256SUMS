@@ -46,7 +46,7 @@ b22a3d87b0cda1cd73f52911261b9901f57255b9c2df1953fe3ca64cbb9b5b30  ./files/clean/
 b95bedef04542d2e4e1b8d7da00ddc8b0573de8c08e806bb090d1b6ef6b3ec0f  ./files/clean/php.inject.n1zb
 f2797486ce871df2aba8b3e04d4cc712e7c912ab45d8fb78d43282014d24f2c2  ./files/clean/php_malware_hexinject
 f2797486ce871df2aba8b3e04d4cc712e7c912ab45d8fb78d43282014d24f2c2  ./files/clean/php.malware.magentocore_ccskim
-21783c0cd6ed58fdcd26e35174d26eebbd4a4aed4c3661d30eed4af4a1e3eca0  ./files/conf.maldet
+fbdecdc1ebba2b387f0c07f959d22a7c1bba3be5f0204fe4a5222b9c45e0d646  ./files/conf.maldet
 f9052ccae6f25e20a3414c0134dd5cc3a52e79e3978567e9fc5889c869159b99  ./files/conf.maldet.hookscan.default
 2f3a0fa1ff9f04bb0e34f575515ed995fc38bb185cc66a7bc1ac95242bda25d7  ./files/cron/conf.maldet.cron
 c9d5c5c5d168e63c3fb2809de41938f9f0e75a05064335e33485ec84b28bd69d  ./files/cron/custom.cron
@@ -88,7 +88,7 @@ c52ba10b13b42df31cf9820164a4c9b87308270b10c53a91e4071b38bdcd9e3b  ./files/intern
 39880498363b07de02d2f1d7c9dfff79c197e5e02163ea029eb7351d0ee1f956  ./files/internals/importconf
 796ba7f8a214ba39a5e007f2554f431878131a4c7733aefac2a938ca85380f36  ./files/internals/internals.conf
 8c4c1cc669bf926979c7d43e8454114b8cf7e50c8ed34ef6933b21d64667c133  ./files/internals/lmd_alert.sh
-85f7fece47de8053ae9ffc86b36cce11480ffb4f5b77ec73b1fd50fb3e1684e8  ./files/internals/lmd_clamav.sh
+1c5a51daf3de71fb0116dacab5731bdf200e45be541e2feaaf56d05a9e64be01  ./files/internals/lmd_clamav.sh
 20742fd8b34524bda45800ec77ac91bfa7bb468881011e64489587352ebcb76e  ./files/internals/lmd_config.sh
 c14ddbadbc2d51c08025562cc551a1f04fb1698482d6e2e81f212b3718fd581e  ./files/internals/lmd_engine.sh
 1ab5a28c6ded27d85c92a100efbc994e2f29a5c780670ef6c2100685ad013b0b  ./files/internals/lmd_hook.sh
