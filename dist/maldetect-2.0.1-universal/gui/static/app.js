@@ -355,6 +355,8 @@
             'scan(s) stopped and resumable.': 'scan(s) parado(s) e retomável(is).',
             'Stopped': 'Parado', 'Resume': 'Retomar', 'Discard': 'Descartar',
             'Resuming...': 'Retomando...', 'Discarding...': 'Descartando...',
+            'Resource Usage': 'Uso de recursos', 'RAM': 'RAM',
+            'Waiting for data...': 'Aguardando dados...', 'Live': 'Ao vivo',
             'No detections in this scan': 'Nenhuma detecção neste scan',
             'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
@@ -454,6 +456,9 @@
             if (this.currentPage === 'monitoring' && name !== 'monitoring') {
                 stopMonitorActivityRefresh();
             }
+            if (this.currentPage === 'dashboard' && name !== 'dashboard') {
+                stopDashboardRefresh();
+            }
             this.currentPage = name;
             var items = document.querySelectorAll('.nav-item');
             for (var i = 0; i < items.length; i++) {
@@ -477,6 +482,7 @@
                     translateDom(content);
                     if (name === 'scan-management') startScanManagementRefresh();
                     if (name === 'monitoring') startMonitorActivityRefresh();
+                    if (name === 'dashboard') startDashboardRefresh();
                 }).catch(function(err) {
                     content.innerHTML = '<div class="card"><p style="color:red;">Error: ' + escapeHtml(err.message) + '</p></div>';
                 });
@@ -592,10 +598,86 @@
     };
 
     // ----- Dashboard -----
+    // ----- Dashboard resource gauges (CPU/RAM, live) -----
+    var GAUGE_CIRCUMFERENCE = 2 * Math.PI * 45;
+    var _dashboardUsageTimer = null;
+
+    function buildGaugeHtml(metric, label) {
+        return '<div class="gauge-item">' +
+            '<div class="gauge" data-gauge="' + metric + '">' +
+            '<svg class="gauge-svg" viewBox="0 0 100 100">' +
+            '<circle class="gauge-track" cx="50" cy="50" r="45"></circle>' +
+            '<circle class="gauge-value" cx="50" cy="50" r="45" ' +
+            'style="stroke-dasharray:' + GAUGE_CIRCUMFERENCE.toFixed(2) + ';stroke-dashoffset:' + GAUGE_CIRCUMFERENCE.toFixed(2) + ';"></circle>' +
+            '</svg>' +
+            '<div class="gauge-center"><span class="gauge-percent">--</span><span class="gauge-percent-sign">%</span></div>' +
+            '</div>' +
+            '<div class="gauge-label">' + escapeHtml(label) + '</div>' +
+            '<div class="gauge-sub" data-gauge-sub="' + metric + '">' + tr('Waiting for data...') + '</div>' +
+            '</div>';
+    }
+
+    function setGaugeValue(metric, percent) {
+        var container = document.querySelector('[data-gauge="' + metric + '"]');
+        if (!container) return;
+        var circle = container.querySelector('.gauge-value');
+        var text = container.querySelector('.gauge-percent');
+        if (percent === null || percent === undefined || isNaN(percent)) {
+            if (text) text.textContent = '--';
+            return;
+        }
+        var pct = Math.max(0, Math.min(100, percent));
+        if (circle) {
+            circle.style.strokeDashoffset = (GAUGE_CIRCUMFERENCE * (1 - pct / 100)).toFixed(2);
+            circle.classList.remove('warning', 'danger');
+            if (pct >= 85) circle.classList.add('danger');
+            else if (pct >= 60) circle.classList.add('warning');
+        }
+        if (text) text.textContent = Math.round(pct);
+    }
+
+    function formatMb(mb) {
+        mb = mb || 0;
+        if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
+        return Math.round(mb) + ' MB';
+    }
+
+    function refreshDashboardUsage() {
+        API.get('/system/usage').then(function(data) {
+            setGaugeValue('cpu', data.cpu_percent);
+            setGaugeValue('ram', data.mem_percent);
+            var cpuSub = document.querySelector('[data-gauge-sub="cpu"]');
+            if (cpuSub) {
+                cpuSub.textContent = (data.cpu_percent === null || data.cpu_percent === undefined)
+                    ? tr('Waiting for data...') : tr('Live');
+            }
+            var ramSub = document.querySelector('[data-gauge-sub="ram"]');
+            if (ramSub && data.mem_total_mb) {
+                ramSub.textContent = formatMb(data.mem_used_mb) + ' / ' + formatMb(data.mem_total_mb);
+            }
+        }).catch(function() {
+            // Silent: transient polling errors shouldn't spam the user with
+            // toasts every few seconds while the dashboard is open.
+        });
+    }
+
+    function startDashboardRefresh() {
+        stopDashboardRefresh();
+        refreshDashboardUsage();
+        _dashboardUsageTimer = setInterval(refreshDashboardUsage, 3000);
+    }
+
+    function stopDashboardRefresh() {
+        if (_dashboardUsageTimer) { clearInterval(_dashboardUsageTimer); _dashboardUsageTimer = null; }
+    }
+
     function renderDashboard() {
         return API.get('/system').then(function(data) {
             var sys = data.system;
             var h = '';
+            h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' + tr('Resource Usage') + '</span></div>';
+            h += '<div class="gauge-row">' + buildGaugeHtml('cpu', tr('CPU')) + buildGaugeHtml('ram', tr('RAM')) + '</div>';
+            h += '</div>';
             h += '<div class="grid grid-4" style="margin-bottom:20px;">';
             h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.version || 'unknown') + '</div><div class="stat-label">Maldet Version</div></div>';
             h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.signature_version || '?') + '</div><div class="stat-label">Signature Set</div></div>';

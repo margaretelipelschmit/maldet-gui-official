@@ -59,6 +59,13 @@ SCAN_START_LOCK = threading.Lock()
 SCAN_START_RESERVATIONS = {}
 SCAN_START_RESERVATION_TTL = 30.0
 
+# Previous /proc/stat CPU jiffie snapshot, used to compute a delta-based
+# CPU usage percentage across polls (a single /proc/stat read cannot yield
+# a percentage on its own). Guarded by CPU_USAGE_LOCK since the HTTP server
+# is threaded and the dashboard may poll from multiple requests.
+CPU_USAGE_LOCK = threading.Lock()
+_LAST_CPU_TIMES = None
+
 
 # ---------------------------------------------------------------------------
 # Path resolution helpers
@@ -374,6 +381,62 @@ def run_clamav_update(force=False):
         "after": after,
         "changed": before != after,
     }
+
+
+def get_cpu_percent():
+    """Compute CPU usage percent from the delta between /proc/stat reads.
+
+    A single /proc/stat snapshot only exposes cumulative jiffie counters,
+    not a percentage, so this keeps the previous snapshot in memory and
+    diffs against it on each call. Returns None on the very first call
+    (no prior snapshot yet) or if /proc/stat is unavailable.
+    """
+    global _LAST_CPU_TIMES
+    try:
+        with open("/proc/stat", "r") as f:
+            line = f.readline()
+        parts = line.split()
+        if not parts or parts[0] != "cpu":
+            return None
+        times = [int(x) for x in parts[1:8]]
+    except Exception:
+        return None
+
+    with CPU_USAGE_LOCK:
+        previous = _LAST_CPU_TIMES
+        _LAST_CPU_TIMES = times
+        if previous is None or len(previous) != len(times):
+            return None
+        deltas = [now - prev for now, prev in zip(times, previous)]
+
+    total = sum(deltas)
+    if total <= 0:
+        return 0.0
+    idle = deltas[3] + deltas[4]  # idle + iowait
+    return round(max(0.0, min(100.0, (total - idle) / total * 100.0)), 1)
+
+
+def get_resource_usage():
+    """Lightweight CPU/RAM usage snapshot for frequent dashboard polling."""
+    usage = {"cpu_percent": get_cpu_percent(), "mem_percent": None,
+             "mem_total_mb": 0, "mem_used_mb": 0, "mem_available_mb": 0}
+    try:
+        mem = {}
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    mem[parts[0].strip()] = int(parts[1].strip().split()[0])
+        total_mb = mem.get("MemTotal", 0) // 1024
+        available_mb = mem.get("MemAvailable", 0) // 1024
+        usage["mem_total_mb"] = total_mb
+        usage["mem_available_mb"] = available_mb
+        usage["mem_used_mb"] = max(0, total_mb - available_mb)
+        if total_mb > 0:
+            usage["mem_percent"] = round(usage["mem_used_mb"] / total_mb * 100.0, 1)
+    except Exception:
+        pass
+    return usage
 
 
 def get_system_info():
@@ -984,6 +1047,9 @@ class MaldetAPI:
         # ---- System / version ----
         if route == "/api/system":
             return 200, {"system": get_system_info()}
+
+        if route == "/api/system/usage" and method == "GET":
+            return 200, get_resource_usage()
 
         if route == "/api/version":
             info = get_system_info()
