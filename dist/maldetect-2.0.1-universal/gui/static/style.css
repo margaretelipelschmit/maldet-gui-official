@@ -977,6 +977,15 @@ tr:hover td {
     box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15);
 }
 
+/* <option> only inherits text color from the <select>, not its background,
+   so browsers render the opened dropdown list with a light native popup
+   background, leaving light theme text nearly invisible. Set both
+   explicitly so the option list matches the app's dark theme. */
+.form-input option, .form-select option {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
 .path-picker-row {
     display: flex;
     gap: 8px;
