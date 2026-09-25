@@ -191,7 +191,19 @@
             'Start': 'Iniciar', 'Reload': 'Recarregar', 'Update': 'Atualizar', 'Beta': 'Beta',
             'Update Sigs': 'Atualizar assinaturas', 'Update ClamAV': 'Atualizar ClamAV',
             'Save Changes': 'Salvar alterações',
-            'Save ignore list': 'Salvar lista de exclusão',
+            'File': 'Arquivo',
+            'Edit values below and save only the settings you changed. Click the tip icon (i) next to a field for details.':
+                'Edite os valores abaixo e salve apenas as configurações alteradas. Clique no ícone de dica (i) ao lado de um campo para mais detalhes.',
+            'Search settings...': 'Pesquisar configurações...',
+            'Expand all': 'Expandir tudo', 'Collapse all': 'Recolher tudo',
+            'Show tip': 'Exibir dica', 'No changes': 'Sem alterações',
+            'unsaved change(s)': 'alteração(ões) não salva(s)',
+            'E-mail': 'E-mail', 'Telegram': 'Telegram',
+            'General Options': 'Opções gerais', 'SCAN OPTIONS': 'Opções de scan',
+            'QUARANTINE OPTIONS': 'Opções de quarentena', 'MONITORING OPTIONS': 'Opções de monitoramento',
+            'STATISTICAL ELK COLLECT': 'Coleta estatística ELK', 'SESSION FORMAT': 'Formato de sessão',
+            'STATISTICAL ANALYSIS': 'Análise estatística', 'SCAN PROGRESS LOGGING': 'Registro de progresso do scan',
+            'POST-SCAN HOOKS': 'Hooks pós-scan',            'Save ignore list': 'Salvar lista de exclusão',
             'Ignore list saved': 'Lista de exclusão salva',
             'Ignore list save failed: ': 'Falha ao salvar a lista de exclusão: ',
             'Test Alerts': 'Testar alertas', 'Type': 'Tipo', 'Channel': 'Canal',
@@ -438,8 +450,15 @@
                 if (item) {
                     e.preventDefault();
                     self.navigate(item.dataset.page);
+                    document.getElementById('sidebar').classList.remove('open');
                 }
             });
+            var mobileMenu = document.getElementById('mobile-menu-btn');
+            if (mobileMenu) {
+                mobileMenu.addEventListener('click', function() {
+                    document.getElementById('sidebar').classList.toggle('open');
+                });
+            }
             var languageSelect = document.getElementById('language-select');
             if (languageSelect) {
                 languageSelect.value = I18N.lang;
@@ -494,6 +513,10 @@
                 else if (action === 'update-clamav') updateClamAv();
                 else if (action === 'update-sigs') updateSigs();
                 else if (action === 'save-config') saveConfig();
+                else if (action === 'config-toggle-section') toggleConfigSection(el);
+                else if (action === 'config-tip-toggle') toggleConfigTip(el);
+                else if (action === 'config-expand-all') setAllConfigSections(true);
+                else if (action === 'config-collapse-all') setAllConfigSections(false);
                 else if (action === 'change-password') changePassword();
                 else if (action === 'security-change-password') securityChangePassword();
                 else if (action === 'send-alert') sendAlert();
@@ -509,9 +532,12 @@
             });
             document.getElementById('content').addEventListener('change', function(e) {
                 if (e.target && e.target.id === 'scan_type') updateScanTypeFields(e.target.value);
+                if (e.target && e.target.matches('input[data-key]')) updateConfigFieldState(e.target);
             });
             document.getElementById('content').addEventListener('input', function(e) {
                 if (e.target && (e.target.id === 'scan_path' || e.target.id === 'scan_days')) updateScanSummary();
+                if (e.target && e.target.id === 'config-search') filterConfigOptions(e.target.value);
+                if (e.target && e.target.matches('input[type="text"][data-key]')) updateConfigFieldState(e.target);
             });
             this.navigate('dashboard');
             translateDom(document.body);
@@ -1520,12 +1546,65 @@
     }
 
     // ----- Config -----
+    var CONFIG_SECTION_ICONS = {
+        'E-mail': '📧', 'Telegram': '📨', 'General Options': '⚙️',
+        'SCAN OPTIONS': '🔍', 'QUARANTINE OPTIONS': '📦', 'MONITORING OPTIONS': '👁️',
+        'STATISTICAL ELK COLLECT': '📊', 'SESSION FORMAT': '🗂️',
+        'STATISTICAL ANALYSIS': '📈', 'SCAN PROGRESS LOGGING': '📝', 'POST-SCAN HOOKS': '🪝'
+    };
+    var CONFIG_LABEL_ACRONYMS = {
+        smtp: 'SMTP', elk: 'ELK', ssh: 'SSH', ftp: 'FTP', ip: 'IP', id: 'ID',
+        url: 'URL', html: 'HTML', tsv: 'TSV', pid: 'PID', uid: 'UID', gid: 'GID',
+        cpu: 'CPU', io: 'IO', tls: 'TLS', ssl: 'SSL'
+    };
+
+    function humanizeConfigLabel(key) {
+        return key.split('_').map(function(word) {
+            var lower = word.toLowerCase();
+            if (CONFIG_LABEL_ACRONYMS[lower]) return CONFIG_LABEL_ACRONYMS[lower];
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        }).join(' ');
+    }
+
+    function isBooleanConfigOption(opt) {
+        var value = (opt.value || '').trim();
+        if (value !== '0' && value !== '1') return false;
+        var tip = (opt.comment || '').toLowerCase();
+        return /\b0\s*=\s*disabled\b/.test(tip) && /\b1\s*=\s*enabled\b/.test(tip);
+    }
+
+    function configFieldHtml(key, opt) {
+        var label = humanizeConfigLabel(key);
+        var tipId = 'config-tip-' + key.replace(/[^a-z0-9_-]/gi, '');
+        var searchText = (label + ' ' + key + ' ' + (opt.comment || '')).toLowerCase();
+        var h = '<div class="config-option" data-key="' + escapeHtml(key) + '" data-search="' + escapeHtml(searchText) + '">';
+        h += '<div class="config-option-head"><div><label class="config-option-label" for="config-' +
+            escapeHtml(key) + '">' + escapeHtml(label) + '</label>' +
+            '<code class="config-option-key">' + escapeHtml(key) + '</code></div>';
+        if (opt.comment) {
+            h += '<button type="button" class="config-tip-btn" data-action="config-tip-toggle" data-tip="' +
+                escapeHtml(tipId) + '" title="' + escapeHtml(tr('Show tip')) + '">i</button>';
+        }
+        h += '</div>';
+        if (isBooleanConfigOption(opt)) {
+            var isEnabled = opt.value === '1';
+            h += '<div class="config-toggle"><label class="config-toggle-switch"><input type="checkbox" id="config-' +
+                escapeHtml(key) + '" data-key="' + escapeHtml(key) + '" data-bool="1"' + (isEnabled ? ' checked' : '') +
+                '><span class="config-toggle-slider"></span></label>' +
+                '<span class="config-toggle-state">' + tr(isEnabled ? 'Enabled' : 'Disabled') + '</span></div>';
+        } else {
+            h += '<input id="config-' + escapeHtml(key) + '" type="text" class="form-input" value="' +
+                escapeHtml(opt.value) + '" data-key="' + escapeHtml(key) + '">';
+        }
+        if (opt.comment) {
+            h += '<div class="config-tip" id="' + escapeHtml(tipId) + '">' + escapeHtml(opt.comment) + '</div>';
+        }
+        return h + '</div>';
+    }
+
     function renderConfig() {
         return API.get('/config').then(function(data) {
             var config = data.config || {};
-            var h = '<div class="config-page"><div class="card config-intro"><div class="card-header"><span class="card-title">Configuration</span></div>';
-            h += '<p class="config-path">File: <code>' + escapeHtml(data.path) + '</code></p>';
-            h += '<p class="form-help">Edit values below and save only the settings you changed.</p></div>';
             var groups = {};
             var groupOrder = [];
             for (var key in config) {
@@ -1540,20 +1619,93 @@
                 }
                 groups[group].push({ key: key, opt: opt });
             }
-            groupOrder.forEach(function(group) {
-                h += '<div class="card config-section"><div class="config-section-title">' + escapeHtml(group) + '</div><div class="config-options">';
+            var h = '<div class="config-page"><div class="card config-intro"><div class="card-header"><span class="card-title">' +
+                tr('Configuration') + '</span></div>';
+            h += '<p class="config-path">' + tr('File') + ': <code>' + escapeHtml(data.path) + '</code></p>';
+            h += '<p class="form-help">' +
+                tr('Edit values below and save only the settings you changed. Click the tip icon (i) next to a field for details.') +
+                '</p>';
+            h += '<div class="config-toolbar"><input type="search" id="config-search" class="form-input config-search" placeholder="' +
+                escapeHtml(tr('Search settings...')) + '">';
+            h += '<div class="config-toolbar-btns"><button type="button" class="btn btn-ghost btn-sm" data-action="config-expand-all">' +
+                tr('Expand all') + '</button><button type="button" class="btn btn-ghost btn-sm" data-action="config-collapse-all">' +
+                tr('Collapse all') + '</button></div></div></div>';
+            groupOrder.forEach(function(group, idx) {
+                var icon = CONFIG_SECTION_ICONS[group] || '🔧';
+                h += '<div class="card config-section' + (idx === 0 ? ' is-open' : '') + '">';
+                h += '<div class="config-section-header" data-action="config-toggle-section">' +
+                    '<span class="config-section-icon">' + icon + '</span>' +
+                    '<h3 class="config-section-title">' + escapeHtml(tr(group)) +
+                    ' <span class="config-section-count">(' + groups[group].length + ')</span></h3>' +
+                    '<span class="config-section-caret">▶</span></div>';
+                h += '<div class="config-options">';
                 groups[group].forEach(function(item) {
-                    var key = item.key, opt = item.opt;
-                    h += '<div class="config-option"><label class="config-option-label" for="config-' + escapeHtml(key) + '"><code>' + escapeHtml(key) + '</code></label>';
-                    h += '<input id="config-' + escapeHtml(key) + '" type="text" class="form-input" value="' + escapeHtml(opt.value) + '" data-key="' + escapeHtml(key) + '">';
-                    if (opt.comment) h += '<small class="config-comment">' + escapeHtml(opt.comment) + '</small>';
-                    h += '</div>';
+                    h += configFieldHtml(item.key, item.opt);
                 });
                 h += '</div></div>';
             });
-            h += '<div class="config-actions"><button class="btn btn-success" id="save-config-btn" data-action="save-config">Save Changes</button></div></div>';
+            h += '<div class="config-save-bar"><span class="config-changed-badge" id="config-changed-badge">' +
+                tr('No changes') + '</span><button class="btn btn-success" id="save-config-btn" data-action="save-config">' +
+                tr('Save Changes') + '</button></div></div>';
             return h;
         });
+    }
+
+    function toggleConfigSection(headerEl) {
+        var section = headerEl.closest('.config-section');
+        if (section) section.classList.toggle('is-open');
+    }
+
+    function setAllConfigSections(open) {
+        document.querySelectorAll('#content .config-section').forEach(function(section) {
+            section.classList.toggle('is-open', open);
+        });
+    }
+
+    function toggleConfigTip(button) {
+        var tip = document.getElementById(button.dataset.tip);
+        if (!tip) return;
+        var isOpen = tip.classList.toggle('is-open');
+        button.classList.toggle('is-active', isOpen);
+    }
+
+    function filterConfigOptions(term) {
+        term = (term || '').trim().toLowerCase();
+        document.querySelectorAll('#content .config-option').forEach(function(opt) {
+            var match = !term || (opt.dataset.search || '').indexOf(term) !== -1;
+            opt.classList.toggle('is-hidden', !match);
+        });
+        document.querySelectorAll('#content .config-section').forEach(function(section) {
+            var visible = section.querySelectorAll('.config-option:not(.is-hidden)').length;
+            section.style.display = (term && visible === 0) ? 'none' : '';
+            if (term && visible > 0) section.classList.add('is-open');
+        });
+    }
+
+    function updateConfigFieldState(input) {
+        var wrap = input.closest('.config-option');
+        if (!wrap) return;
+        var modified = input.type === 'checkbox' ?
+            (input.checked !== input.defaultChecked) : (input.value !== input.defaultValue);
+        wrap.classList.toggle('is-modified', modified);
+        if (input.type === 'checkbox') {
+            var state = wrap.querySelector('.config-toggle-state');
+            if (state) state.textContent = tr(input.checked ? 'Enabled' : 'Disabled');
+        }
+        updateConfigChangedBadge();
+    }
+
+    function updateConfigChangedBadge() {
+        var badge = document.getElementById('config-changed-badge');
+        if (!badge) return;
+        var count = document.querySelectorAll('#content .config-option.is-modified').length;
+        if (count > 0) {
+            badge.textContent = count + ' ' + tr('unsaved change(s)');
+            badge.classList.add('has-changes');
+        } else {
+            badge.textContent = tr('No changes');
+            badge.classList.remove('has-changes');
+        }
     }
 
     function changePassword() {
@@ -1651,7 +1803,11 @@
         var inputs = document.querySelectorAll('#content input[data-key]');
         var changes = [];
         inputs.forEach(function(inp) {
-            if (inp.value !== inp.defaultValue) {
+            if (inp.dataset.bool === '1') {
+                if (inp.checked !== inp.defaultChecked) {
+                    changes.push(API.put('/config', { key: inp.dataset.key, value: inp.checked ? '1' : '0' }));
+                }
+            } else if (inp.value !== inp.defaultValue) {
                 changes.push(API.put('/config', { key: inp.dataset.key, value: inp.value }));
             }
         });

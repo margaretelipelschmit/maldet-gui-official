@@ -590,36 +590,81 @@ def quarantine_details(filename):
 # Utility: configuration management
 # ---------------------------------------------------------------------------
 
+_CONF_SECTION_RE = re.compile(r"^#\s*\[\s*(.+?)\s*\]\s*$")
+_CONF_VALUE_RE = re.compile(r'^(\w+)="([^"]*)"\s*(?:#\s*(.*))?$')
+
+
 def parse_config(path=None):
-    """Parse a maldet configuration file into a dict."""
+    """Parse a maldet configuration file into a dict.
+
+    Section headers are ``##`` / ``# [ Name ] `` / ``##`` three-line blocks
+    (with optional extra description lines in between, which are treated as
+    decorative and discarded). The full multi-line comment block that
+    precedes each option — plus any trailing same-line comment — is joined
+    together as that option's ``comment`` (used as a GUI tooltip/tip).
+    """
     if path is None:
         path = get_conf_path()
     config = {}
     if not os.path.isfile(path):
         return config
-    current_section = "General"
-    current_comment = ""
     try:
-        for line in open(path, "r", errors="replace"):
-            stripped = line.strip()
-            m = re.match(r"^##\s*#\s*\[ (.+?) \]\s*##", stripped)
-            if m:
-                current_section = m.group(1)
-                current_comment = ""
-                continue
-            if stripped.startswith("#"):
-                current_comment = stripped
-                continue
-            m = re.match(r'^(\w+)="([^"]*)"', stripped)
-            if m:
-                config[m.group(1)] = {
-                    "value": m.group(2),
-                    "comment": current_comment,
-                    "section": current_section,
-                }
-                current_comment = ""
+        with open(path, "r", errors="replace") as handle:
+            lines = handle.readlines()
     except Exception as e:
         config["__error__"] = {"error": str(e)}
+        return config
+
+    current_section = "General"
+    comment_lines = []
+    i, total = 0, len(lines)
+    while i < total:
+        stripped = lines[i].strip()
+        if stripped == "##":
+            # Look ahead (bounded) for the matching closing "##" of this
+            # decorative/section-header block, and for a "[ Name ]" bracket
+            # line identifying a real section within it.
+            close_idx = None
+            bracket_name = None
+            for j in range(i + 1, min(i + 12, total)):
+                probe = lines[j].strip()
+                if probe == "##":
+                    close_idx = j
+                    break
+                if bracket_name is None:
+                    m = _CONF_SECTION_RE.match(probe)
+                    if m:
+                        bracket_name = m.group(1)
+            if close_idx is not None:
+                if bracket_name:
+                    current_section = bracket_name
+                comment_lines = []
+                i = close_idx + 1
+                continue
+            i += 1
+            continue
+        if stripped.startswith("#"):
+            text = stripped.lstrip("#").strip()
+            if text:
+                comment_lines.append(text)
+            i += 1
+            continue
+        if not stripped:
+            i += 1
+            continue
+        m = _CONF_VALUE_RE.match(stripped)
+        if m:
+            key, value, inline_comment = m.group(1), m.group(2), m.group(3)
+            tip = list(comment_lines)
+            if inline_comment:
+                tip.append(inline_comment.strip())
+            config[key] = {
+                "value": value,
+                "comment": "\n".join(tip),
+                "section": current_section,
+            }
+            comment_lines = []
+        i += 1
     return config
 
 
