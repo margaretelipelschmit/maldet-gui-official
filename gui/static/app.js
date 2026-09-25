@@ -355,6 +355,8 @@
             'scan(s) stopped and resumable.': 'scan(s) parado(s) e retomável(is).',
             'Stopped': 'Parado', 'Resume': 'Retomar', 'Discard': 'Descartar',
             'Resuming...': 'Retomando...', 'Discarding...': 'Descartando...',
+            'Resource Usage': 'Uso de recursos', 'RAM': 'RAM',
+            'Waiting for data...': 'Aguardando dados...', 'Live': 'Ao vivo',
             'No detections in this scan': 'Nenhuma detecção neste scan',
             'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
@@ -454,6 +456,9 @@
             if (this.currentPage === 'monitoring' && name !== 'monitoring') {
                 stopMonitorActivityRefresh();
             }
+            if (this.currentPage === 'dashboard' && name !== 'dashboard') {
+                stopDashboardRefresh();
+            }
             this.currentPage = name;
             var items = document.querySelectorAll('.nav-item');
             for (var i = 0; i < items.length; i++) {
@@ -477,6 +482,7 @@
                     translateDom(content);
                     if (name === 'scan-management') startScanManagementRefresh();
                     if (name === 'monitoring') startMonitorActivityRefresh();
+                    if (name === 'dashboard') startDashboardRefresh();
                 }).catch(function(err) {
                     content.innerHTML = '<div class="card"><p style="color:red;">Error: ' + escapeHtml(err.message) + '</p></div>';
                 });
@@ -579,6 +585,7 @@
             });
             document.getElementById('content').addEventListener('change', function(e) {
                 if (e.target && e.target.id === 'scan_type') updateScanTypeFields(e.target.value);
+                if (e.target && e.target.id === 'scan_engine') updateScanEngineHelp();
                 if (e.target && e.target.matches('input[data-key]')) updateConfigFieldState(e.target);
             });
             document.getElementById('content').addEventListener('input', function(e) {
@@ -592,10 +599,86 @@
     };
 
     // ----- Dashboard -----
+    // ----- Dashboard resource gauges (CPU/RAM, live) -----
+    var GAUGE_CIRCUMFERENCE = 2 * Math.PI * 45;
+    var _dashboardUsageTimer = null;
+
+    function buildGaugeHtml(metric, label) {
+        return '<div class="gauge-item">' +
+            '<div class="gauge" data-gauge="' + metric + '">' +
+            '<svg class="gauge-svg" viewBox="0 0 100 100">' +
+            '<circle class="gauge-track" cx="50" cy="50" r="45"></circle>' +
+            '<circle class="gauge-value" cx="50" cy="50" r="45" ' +
+            'style="stroke-dasharray:' + GAUGE_CIRCUMFERENCE.toFixed(2) + ';stroke-dashoffset:' + GAUGE_CIRCUMFERENCE.toFixed(2) + ';"></circle>' +
+            '</svg>' +
+            '<div class="gauge-center"><span class="gauge-percent">--</span><span class="gauge-percent-sign">%</span></div>' +
+            '</div>' +
+            '<div class="gauge-label">' + escapeHtml(label) + '</div>' +
+            '<div class="gauge-sub" data-gauge-sub="' + metric + '">' + tr('Waiting for data...') + '</div>' +
+            '</div>';
+    }
+
+    function setGaugeValue(metric, percent) {
+        var container = document.querySelector('[data-gauge="' + metric + '"]');
+        if (!container) return;
+        var circle = container.querySelector('.gauge-value');
+        var text = container.querySelector('.gauge-percent');
+        if (percent === null || percent === undefined || isNaN(percent)) {
+            if (text) text.textContent = '--';
+            return;
+        }
+        var pct = Math.max(0, Math.min(100, percent));
+        if (circle) {
+            circle.style.strokeDashoffset = (GAUGE_CIRCUMFERENCE * (1 - pct / 100)).toFixed(2);
+            circle.classList.remove('warning', 'danger');
+            if (pct >= 85) circle.classList.add('danger');
+            else if (pct >= 60) circle.classList.add('warning');
+        }
+        if (text) text.textContent = Math.round(pct);
+    }
+
+    function formatMb(mb) {
+        mb = mb || 0;
+        if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
+        return Math.round(mb) + ' MB';
+    }
+
+    function refreshDashboardUsage() {
+        API.get('/system/usage').then(function(data) {
+            setGaugeValue('cpu', data.cpu_percent);
+            setGaugeValue('ram', data.mem_percent);
+            var cpuSub = document.querySelector('[data-gauge-sub="cpu"]');
+            if (cpuSub) {
+                cpuSub.textContent = (data.cpu_percent === null || data.cpu_percent === undefined)
+                    ? tr('Waiting for data...') : tr('Live');
+            }
+            var ramSub = document.querySelector('[data-gauge-sub="ram"]');
+            if (ramSub && data.mem_total_mb) {
+                ramSub.textContent = formatMb(data.mem_used_mb) + ' / ' + formatMb(data.mem_total_mb);
+            }
+        }).catch(function() {
+            // Silent: transient polling errors shouldn't spam the user with
+            // toasts every few seconds while the dashboard is open.
+        });
+    }
+
+    function startDashboardRefresh() {
+        stopDashboardRefresh();
+        refreshDashboardUsage();
+        _dashboardUsageTimer = setInterval(refreshDashboardUsage, 3000);
+    }
+
+    function stopDashboardRefresh() {
+        if (_dashboardUsageTimer) { clearInterval(_dashboardUsageTimer); _dashboardUsageTimer = null; }
+    }
+
     function renderDashboard() {
         return API.get('/system').then(function(data) {
             var sys = data.system;
             var h = '';
+            h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' + tr('Resource Usage') + '</span></div>';
+            h += '<div class="gauge-row">' + buildGaugeHtml('cpu', tr('CPU')) + buildGaugeHtml('ram', tr('RAM')) + '</div>';
+            h += '</div>';
             h += '<div class="grid grid-4" style="margin-bottom:20px;">';
             h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.version || 'unknown') + '</div><div class="stat-label">Maldet Version</div></div>';
             h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.signature_version || '?') + '</div><div class="stat-label">Signature Set</div></div>';
@@ -630,15 +713,21 @@
 
     // ----- Scanner -----
     function renderScanner() {
-        return API.get('/config').then(function(data) {
+        return Promise.all([API.get('/config'), API.get('/system')]).then(function(results) {
+            var data = results[0];
+            var sys = (results[1] && results[1].system) || {};
             var cm = {};
             for (var k in data.config) cm[k] = data.config[k].value;
+            var clamavAvailable = sys.clamav_status === 'available';
             var h = '<div class="card"><div class="card-header"><span class="card-title">Scan Configuration</span></div>';
             h += '<div class="tabs"><div class="tab active" data-action="scanner-tab" data-tab="basic">Basic</div>';
             h += '<div class="tab" data-action="scanner-tab" data-tab="adv">Advanced</div></div>';
             h += '<div id="tab-basic"><div class="form-group"><label class="form-label">Scan Type</label>';
             h += '<select class="form-input" id="scan_type"><option value="all">Full Scan</option><option value="recent">Recent Scan</option></select><small class="form-help" id="scan_type_help">Scans all files below the selected path.</small></div>';
-            h += '<div class="form-group"><label class="form-label">Scanner engine</label><div class="form-input" aria-readonly="true">Maldet nativo</div><small class="form-help">Todos os scans usam exclusivamente o mecanismo nativo do Maldet.</small></div>';
+            h += '<div class="form-group"><label class="form-label">Scanner engine</label>';
+            h += '<select class="form-input" id="scan_engine"><option value="native">Maldet nativo (MD5/SHA256/HEX/YARA)</option>';
+            h += '<option value="clamscan"' + (clamavAvailable ? '' : ' disabled') + '>ClamAV (clamscan)' + (clamavAvailable ? '' : ' — não instalado') + '</option></select>';
+            h += '<small class="form-help" id="scan_engine_help">Mecanismo nativo do Maldet: mais rápido, assinaturas MD5/HEX/YARA próprias.</small></div>';
             h += '<div class="form-group"><label class="form-label">Path</label><div class="path-picker-row"><input type="text" class="form-input" id="scan_path" value="/home" required placeholder="/home/user"><button type="button" class="btn btn-ghost" data-action="folder-picker">Browse</button></div><small class="form-help">Choose a folder or enter an absolute directory path manually.</small></div>';
             h += '<div class="form-group" id="scan_days_group" style="display:none;"><label class="form-label">Modified within (days)</label><input type="number" class="form-input" id="scan_days" value="2" min="1" step="1"><small class="form-help">Only files modified in this many days will be scanned.</small></div></div>';
             h += '<div id="tab-adv" style="display:none;"><div class="form-group"><label class="form-label">Config Overrides (-co)</label><input type="text" class="form-input" id="scan_co" placeholder="scan_yara=1,scan_hashtype=sha256"></div>';
@@ -650,6 +739,17 @@
             return h;
         });
     }
+
+    function updateScanEngineHelp() {
+        var engineEl = document.getElementById('scan_engine');
+        var help = document.getElementById('scan_engine_help');
+        if (!engineEl || !help) return;
+        help.textContent = engineEl.value === 'clamscan' ?
+            'ClamAV: usa o antivírus do sistema (clamscan) e o banco de assinaturas do ClamAV.' :
+            'Mecanismo nativo do Maldet: mais rápido, assinaturas MD5/HEX/YARA próprias.';
+        updateScanSummary();
+    }
+
 
     function updateScanTypeFields(type) {
         var daysGroup = document.getElementById('scan_days_group');
@@ -664,14 +764,16 @@
         var path = document.getElementById('scan_path');
         var type = document.getElementById('scan_type');
         var days = document.getElementById('scan_days');
+        var engine = document.getElementById('scan_engine');
         var summary = document.getElementById('scan_summary');
         if (!path || !type || !summary) return;
         var label = type.options[type.selectedIndex].text;
         var value = path.value.trim() || '(enter a path)';
         var detail = type.value === 'recent' ? ' · modified within ' +
             escapeHtml((days && days.value) || '2') + ' day(s)' : '';
+        var engineLabel = engine ? ' · engine: ' + escapeHtml(engine.value === 'clamscan' ? 'ClamAV' : 'Maldet nativo') : '';
         summary.innerHTML = 'Ready to run <strong>' + escapeHtml(label) + '</strong> on <code>' +
-            escapeHtml(value) + '</code>' + detail + '. <span>No scan has started yet.</span>';
+            escapeHtml(value) + '</code>' + detail + engineLabel + '. <span>No scan has started yet.</span>';
     }
 
     var _folderPickerTargetId = 'scan_path';
@@ -759,6 +861,7 @@
         var scanTypeEl = document.getElementById('scan_type');
         var scanPathEl = document.getElementById('scan_path');
         var scanDaysEl = document.getElementById('scan_days');
+        var scanEngineEl = document.getElementById('scan_engine');
         var scanCoEl = document.getElementById('scan_co');
         var scanIncEl = document.getElementById('scan_inc');
         var scanExcEl = document.getElementById('scan_exc');
@@ -784,9 +887,8 @@
             type: type,
             path: path,
             days: (scanDaysEl && scanDaysEl.value) || '2',
-            config_overrides: ((scanCoEl && scanCoEl.value) || '') +
-                ((scanCoEl && scanCoEl.value) ? ',' : '') +
-                'scan_clamscan=0',
+            engine: (scanEngineEl && scanEngineEl.value) || 'native',
+            config_overrides: (scanCoEl && scanCoEl.value) || '',
             include_regex: (scanIncEl && scanIncEl.value) || '',
             exclude_regex: (scanExcEl && scanExcEl.value) || '',
             background: !!(scanBgEl && scanBgEl.checked)
@@ -851,11 +953,9 @@
                 var progressStarted = total > 0 && (scanClockStarted || scanned > 0);
                 var percent = progressStarted ? Math.min(100, Math.max(0, (scanned / total) * 100)) : 0;
                 var progressText = progressStarted && total > 0 ? Math.round(percent) + '%' : '';
-                var currentFile = progress.current_file || s.current_file || '';
-                var currentFileHtml = progressStarted && currentFile ? '<div class="scan-current-file" title="' + escapeHtml(currentFile) + '">Current: ' + escapeHtml(currentFile) + '</div>' : '';
                 var progressBar = progressStarted ? '<div class="scan-progress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.round(percent) + '">' +
                     '<div class="scan-progress-track"><div class="scan-progress-fill" style="width:' + percent.toFixed(1) + '%;"></div></div>' +
-                    '<span class="scan-progress-label">' + progressText + '</span>' + currentFileHtml + '</div>' :
+                    '<span class="scan-progress-label">' + progressText + '</span></div>' :
                     '<span class="form-help">Waiting for first file...</span>';
                 var filesText = progressStarted ? (scanned + ' / ' + total) : 'Waiting for scan start';
                 h += '<tr><td>' + escapeHtml(s.scan_id) + '</td><td style="font-size:12px;max-width:260px;word-break:break-all;">' + escapeHtml(s.path || '-') + '</td><td>' + escapeHtml(s.state) + '</td><td>' + escapeHtml(s.engine || '-') + '</td>';

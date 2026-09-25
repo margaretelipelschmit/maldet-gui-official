@@ -65,6 +65,10 @@ _build_scan_filters() {
 }
 
 _scan_cleanup() {
+	# Release this scan's hold on the shared clamd-daemon CPU throttle, if any
+	# was applied by _clamd_apply_throttle() (no-op if never applied).
+	_clamd_restore_throttle "$scanid"
+
 	# In stop mode, preserve scan_session for checkpoint resume via --continue.
 	# All other runtime temp files are cleaned normally.
 	if [ "${_scan_stop_mode:-0}" != "1" ]; then
@@ -485,7 +489,10 @@ _resolve_worker_count() {
 	local _count="${scan_workers:-auto}"
 	if [ "$_count" == "auto" ] || [ "$_count" -le 0 ] 2>/dev/null; then  # auto or 0 (legacy)
 		_count=$(nproc 2>/dev/null || grep -E -c '^processor' /proc/cpuinfo 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
-		_count=$((_count * 2))
+		# Always use at most half of the available CPU cores so the scan
+		# never saturates the whole host, regardless of core count.
+		_count=$((_count / 2))
+		if [ "$_count" -lt 1 ]; then _count=1; fi
 		if [ "$_count" -gt 8 ]; then _count=8; fi
 	fi
 	if [ "$_count" -gt 8 ]; then _count=8; fi
@@ -588,6 +595,7 @@ _scan_run_native() {
 							"$_md5_pfile" "$scanid" \
 							> "$tmpdir/.md5_worker.$_scan_ns_pid.${_w}" 2>/dev/null &  # suppress worker file-access stderr
 						_md5_worker_pids[_w]=$!
+						_scan_throttle_worker_pid "$!"
 					fi
 					_w=$((_w + 1))
 				done
@@ -670,6 +678,7 @@ _scan_run_native() {
 							"$_sha256_pfile" "$scanid" \
 							> "$tmpdir/.sha256_worker.$_scan_ns_pid.${_w}" 2>/dev/null &  # suppress worker file-access stderr
 						_sha256_worker_pids[_w]=$!
+						_scan_throttle_worker_pid "$!"
 					fi
 					_w=$((_w + 1))
 				done
@@ -795,6 +804,7 @@ _scan_run_native() {
 					"$_w_chunk_skip" \
 					> "$_wout" 2>/dev/null &  # suppress worker file-access stderr
 				_worker_pids[_w]=$!
+				_scan_throttle_worker_pid "$!"
 				_worker_outputs[_w]="$_wout"
 			fi
 			_w=$((_w + 1))
@@ -890,6 +900,14 @@ scan() {
 	# Actual process PID — in background mode (-b), $$ is the dead parent;
 	# BASHPID reflects the real forked child PID for lifecycle liveness checks.
 	_scan_pid="${BASHPID:-$$}"
+	# Renice/ionice/cpulimit the scan orchestrator process itself, not just
+	# its spawned hash/hex workers: this top-level process does real
+	# CPU-bound work directly (file list handling, worker chunk
+	# distribution/collection, hex/csig bookkeeping) that previously ran at
+	# default priority regardless of scan_cpunice/scan_ionice/scan_cpulimit.
+	# monitor_forks=0 since each worker already gets its own independent
+	# cpulimit watcher (see _scan_throttle_worker_pid call sites below).
+	_scan_throttle_worker_pid "$_scan_pid" 0
 	# Continue mode: use checkpoint scanid instead of fresh one
 	if [ -n "${_continue_scanid:-}" ]; then
 		scanid="$_continue_scanid"
@@ -979,6 +997,10 @@ scan() {
 	local _gensigs_elapsed=$(( SECONDS - _gensigs_start ))
 	if [ "$scan_clamscan" == "1" ]; then
 		clamselector
+		# Throttle the shared clamd daemon itself (not just the clamdscan
+		# client) so scan_cpunice/scan_cpulimit actually limit CPU use when
+		# ClamAV's daemon engine is in play — restored in _scan_cleanup.
+		_clamd_apply_throttle "$scanid"
 	fi
 
 	# Re-count from runtime files (may differ from preview due to custom sig merging)

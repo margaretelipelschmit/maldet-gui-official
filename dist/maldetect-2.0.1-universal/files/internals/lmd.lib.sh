@@ -96,6 +96,63 @@ _build_nice_command() {
 	fi
 }
 
+# _scan_throttle_worker_pid pid [monitor_forks] — apply
+# scan_cpunice/scan_ionice/scan_cpulimit to an already-running background
+# PID. monitor_forks defaults to 1 (cpulimit -m); pass 0 to throttle only
+# the given PID itself, not its descendants (see the top-level-scan-process
+# case below).
+#
+# $nice_command only works as an exec PREFIX for external binaries (find,
+# clamscan, yara, inotifywait); it cannot throttle the native scan engine's
+# batch hash/hex/csig workers in lmd_engine.sh, since those are bash
+# FUNCTIONS backgrounded directly (worker &), not a separate exec - there is
+# no external command line for nice_command to prefix. Left unthrottled, up
+# to 8 fully-parallel worker processes (see _resolve_worker_count) running
+# raw md5sum/sha256sum/grep/awk pipelines can peg every core on the host
+# regardless of scan_cpunice/scan_cpulimit, exactly like the clamd daemon
+# did before _clamd_apply_throttle. This renices/ionices/cpulimits the
+# worker's PID right after it is backgrounded instead, mirroring that same
+# daemon-throttle approach but simpler: each worker is this scan's own
+# private child (no cross-scan sharing), so no holder refcounting is
+# needed, and cpulimit's "-z/--lazy" flag makes its watcher exit on its own
+# the moment the worker finishes - no explicit cleanup required.
+#
+# Also used (with monitor_forks=0) on the top-level scan process itself
+# ($_scan_pid in lmd_scan.sh's scan()): that orchestrator process does
+# significant CPU-bound work directly in its own bash interpreter (building
+# the file list, distributing/collecting worker chunks, hex/csig
+# bookkeeping) which was never covered by any nice/ionice/cpulimit despite
+# the scan log claiming priorities were set "for all operations" - only
+# the individually-spawned workers were. monitor_forks=0 avoids double
+# cpulimit-throttling: the scan process's workers already get their own
+# independent -m watcher via the calls below, so watching the scan
+# process's forks too would throttle the same descendant PIDs twice.
+_scan_throttle_worker_pid() {
+	local _wpid="$1"
+	local _monitor_forks="${2:-1}"
+	[ -n "$_wpid" ] || return 0
+	kill -0 "$_wpid" 2>/dev/null || return 0
+	if [ -n "$nice" ] && [ -f "$nice" ] && [ -n "${scan_cpunice:-}" ]; then
+		# Absolute priority: see the matching note in lmd_clamav.sh's
+		# _clamd_apply_throttle for why "-n" is intentionally omitted.
+		renice "$scan_cpunice" -p "$_wpid" >/dev/null 2>&1
+	fi
+	if [ -n "$ionice" ] && [ -f "$ionice" ] && [ ! -d "/proc/vz" ] && [ -n "${scan_ionice:-}" ]; then
+		"$ionice" -c2 -n "$scan_ionice" -p "$_wpid" >/dev/null 2>&1
+	fi
+	if [ -n "$cpulimit" ] && [ -f "$cpulimit" ] && [ "${scan_cpulimit:-0}" -gt 0 ] 2>/dev/null; then
+		# -m/--monitor-forks is required: the worker's actual CPU-heavy
+		# work (md5sum/sha256sum/grep/awk) runs in forked children, not
+		# in the worker's own bash PID (which mostly just waits on
+		# xargs) — without it cpulimit would throttle the wrong process.
+		local _cl_args=(-p "$_wpid" -l "$scan_cpulimit" -z)
+		[ "$_monitor_forks" = "1" ] && _cl_args+=(-m)
+		"$cpulimit" "${_cl_args[@]}" >/dev/null 2>&1 &
+		disown 2>/dev/null
+	fi
+	return 0
+}
+
 _require_bin() {
 	if [ -z "$2" ]; then
 		header
