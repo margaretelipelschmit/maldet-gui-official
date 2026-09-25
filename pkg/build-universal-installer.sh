@@ -21,7 +21,8 @@ cd "$root_dir"
 # Keep the bundle limited to files consumed by install.sh and the user-facing
 # documentation. Runtime state, credentials, tests, VCS metadata, and packages
 # for a specific distribution are intentionally excluded.
-cp -p install.sh uninstall.sh README README.md CHANGELOG COPYING.GPL "$stage_dir/$bundle_name/"
+cp -p install.sh uninstall.sh README README.md CHANGELOG COPYING.GPL \
+	cron.daily cron.watchdog cron.d.pub cron.d.sigup "$stage_dir/$bundle_name/"
 if [ -d docs ]; then
 	cp -a docs "$stage_dir/$bundle_name/docs"
 fi

@@ -1,5 +1,9 @@
 dc92c6c1ef199140b1a8d16646ffc93948816747df6ed89dba390c10bdf03fdb  ./CHANGELOG
 640d90f6ee401241ff62834d0d1b33f83049e99b8bfdfa04ed1b0a1635dde3e7  ./COPYING.GPL
+4b4c462f9a754b13c6246ea06bc6ad96ff9167bd8bb140928fb0e819d55e0ae3  ./cron.daily
+a97208df7cd68bc25da6c554393c11d75f1811f6449688871a0b39f13ca787f8  ./cron.d.pub
+672fc7dc49a4ebc38a2703e6fef010b4abc672da1d72e1ed7c7b84cc576c8a01  ./cron.d.sigup
+e2eb6acf79c7c56e64c12c3a5468c32019df01485414a2a7f821b57116aa16b7  ./cron.watchdog
 225fbc47498111543fde25b1be560e48166eecc6b409125d08a3c1967591ee49  ./docs/GUI-MANUAL-ILLUSTRATED.md
 75c261c33ac77ac8bce61a2a0b2a8fff56d916bd10bd2042bb2a5c32bffd549a  ./docs/GUI-MANUAL-ILUSTRADO.md
 e315d722cff83c776caa7a4b0fe0ea341408abc70be61ee3cbe0523003759ce3  ./docs/GUI-MANUAL.md
@@ -35,7 +39,6 @@ c00e1333b50069a1c78a9923d981a5ee365d4ad04d26a54c9a94fdaaecec666b  ./docs/images/
 9c97273ccfb160fa7c1984dbec8829ecd0ba54e310e7f76d0fc6f2dd55aa8462  ./docs/images/gui-en/14.png
 568d428f937684071827b077d8aff32bc7819fb68a9b95451cc2dc1450c38e42  ./docs/images/gui-en/15.png
 b22a3d87b0cda1cd73f52911261b9901f57255b9c2df1953fe3ca64cbb9b5b30  ./files/clean/base64.inject.unclassed
-945f88441578b0ed0ce7d444f6c7f400ddd4f8f39111651369008870e2fe18bf  ./files/clean/gzbase64.inject.unclassed
 8d7359fda7ad4675eeb8dcf4289d5be734f88f8e9622803efa9da4a0874906da  ./files/clean/js.inject.fakejquery02
 08dd814467bfd1ed43bede66b25d9f43ac8602d0855390435a99d9335b531efb  ./files/clean/js.inject.VisitorTracker
 19ebea98c251a3a2f28e6cd233fd129d899019a0b26fe1e12376f8455a4663df  ./files/clean/php.brute.bf1lic
