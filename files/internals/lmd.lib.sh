@@ -96,6 +96,46 @@ _build_nice_command() {
 	fi
 }
 
+# _scan_throttle_worker_pid pid — apply scan_cpunice/scan_ionice/scan_cpulimit
+# to an already-running background PID.
+#
+# $nice_command only works as an exec PREFIX for external binaries (find,
+# clamscan, yara, inotifywait); it cannot throttle the native scan engine's
+# batch hash/hex/csig workers in lmd_engine.sh, since those are bash
+# FUNCTIONS backgrounded directly (worker &), not a separate exec - there is
+# no external command line for nice_command to prefix. Left unthrottled, up
+# to 8 fully-parallel worker processes (see _resolve_worker_count) running
+# raw md5sum/sha256sum/grep/awk pipelines can peg every core on the host
+# regardless of scan_cpunice/scan_cpulimit, exactly like the clamd daemon
+# did before _clamd_apply_throttle. This renices/ionices/cpulimits the
+# worker's PID right after it is backgrounded instead, mirroring that same
+# daemon-throttle approach but simpler: each worker is this scan's own
+# private child (no cross-scan sharing), so no holder refcounting is
+# needed, and cpulimit's "-z/--lazy" flag makes its watcher exit on its own
+# the moment the worker finishes - no explicit cleanup required.
+_scan_throttle_worker_pid() {
+	local _wpid="$1"
+	[ -n "$_wpid" ] || return 0
+	kill -0 "$_wpid" 2>/dev/null || return 0
+	if [ -n "$nice" ] && [ -f "$nice" ] && [ -n "${scan_cpunice:-}" ]; then
+		# Absolute priority: see the matching note in lmd_clamav.sh's
+		# _clamd_apply_throttle for why "-n" is intentionally omitted.
+		renice "$scan_cpunice" -p "$_wpid" >/dev/null 2>&1
+	fi
+	if [ -n "$ionice" ] && [ -f "$ionice" ] && [ ! -d "/proc/vz" ] && [ -n "${scan_ionice:-}" ]; then
+		"$ionice" -c2 -n "$scan_ionice" -p "$_wpid" >/dev/null 2>&1
+	fi
+	if [ -n "$cpulimit" ] && [ -f "$cpulimit" ] && [ "${scan_cpulimit:-0}" -gt 0 ] 2>/dev/null; then
+		# -m/--monitor-forks is required: the worker's actual CPU-heavy
+		# work (md5sum/sha256sum/grep/awk) runs in forked children, not
+		# in the worker's own bash PID (which mostly just waits on
+		# xargs) — without it cpulimit would throttle the wrong process.
+		"$cpulimit" -p "$_wpid" -l "$scan_cpulimit" -z -m >/dev/null 2>&1 &
+		disown 2>/dev/null
+	fi
+	return 0
+}
+
 _require_bin() {
 	if [ -z "$2" ]; then
 		header

@@ -592,6 +592,7 @@ _scan_run_native() {
 							"$_md5_pfile" "$scanid" \
 							> "$tmpdir/.md5_worker.$_scan_ns_pid.${_w}" 2>/dev/null &  # suppress worker file-access stderr
 						_md5_worker_pids[_w]=$!
+						_scan_throttle_worker_pid "$!"
 					fi
 					_w=$((_w + 1))
 				done
@@ -674,6 +675,7 @@ _scan_run_native() {
 							"$_sha256_pfile" "$scanid" \
 							> "$tmpdir/.sha256_worker.$_scan_ns_pid.${_w}" 2>/dev/null &  # suppress worker file-access stderr
 						_sha256_worker_pids[_w]=$!
+						_scan_throttle_worker_pid "$!"
 					fi
 					_w=$((_w + 1))
 				done
@@ -799,6 +801,7 @@ _scan_run_native() {
 					"$_w_chunk_skip" \
 					> "$_wout" 2>/dev/null &  # suppress worker file-access stderr
 				_worker_pids[_w]=$!
+				_scan_throttle_worker_pid "$!"
 				_worker_outputs[_w]="$_wout"
 			fi
 			_w=$((_w + 1))

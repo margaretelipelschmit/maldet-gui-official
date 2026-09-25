@@ -338,3 +338,74 @@ _spawn_mock_clamd() {
     kill "$mock_pid" 2>/dev/null
     rm -rf "$mockbin" "$tmpdir"
 }
+
+# _scan_throttle_worker_pid covers the native engine's own parallel batch
+# workers (md5/sha256/hex-csig — see lmd_scan.sh), which spawn raw
+# md5sum/sha256sum/grep/awk pipelines directly in the background and were
+# never wrapped by $nice_command (that variable only works as an exec
+# PREFIX for external binaries; it can't wrap an already-backgrounded bash
+# function). Left unthrottled, up to 8 parallel workers can peg every core
+# regardless of scan_cpunice/scan_cpulimit — this is the native-engine
+# equivalent of the clamd-daemon-throttle gap fixed above.
+
+@test "_scan_throttle_worker_pid renices an already-running worker PID" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    _source_lmd_stack_resource
+    scan_cpunice=19
+    scan_ionice=6
+    scan_cpulimit=0
+
+    sleep 30 &
+    local worker_pid=$!
+
+    _scan_throttle_worker_pid "$worker_pid"
+    run bash -c "ps -o ni= -p $worker_pid | tr -d ' '"
+    assert_output "19"
+
+    kill "$worker_pid" 2>/dev/null
+}
+
+@test "_scan_throttle_worker_pid is a harmless no-op for an already-exited PID" {
+    _source_lmd_stack_resource
+    scan_cpunice=19
+    scan_ionice=6
+    scan_cpulimit=0
+
+    sleep 0.01 &
+    local dead_pid=$!
+    wait "$dead_pid" 2>/dev/null
+
+    run _scan_throttle_worker_pid "$dead_pid"
+    assert_success
+}
+
+@test "_scan_throttle_worker_pid applies cpulimit to a worker PID when scan_cpulimit is set" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    command -v cpulimit >/dev/null 2>&1 || skip "cpulimit not available"
+    _source_lmd_stack_resource
+    scan_cpunice=19
+    scan_ionice=6
+    scan_cpulimit=50
+
+    : > /tmp/lmd-test-worker-busy.flag
+    bash -c 'while [ -f /tmp/lmd-test-worker-busy.flag ]; do :; done' &
+    local worker_pid=$!
+
+    _scan_throttle_worker_pid "$worker_pid"
+    sleep 0.3
+    # -m/--monitor-forks is required here: the worker's actual CPU-heavy
+    # work (md5sum/sha256sum/grep/awk) runs in a forked child, not in the
+    # worker's own PID — cpulimit -p alone (no -m) would silently watch
+    # the wrong process and throttle nothing.
+    run pgrep -f "cpulimit -p $worker_pid -l 50 -z -m"
+    assert_success
+
+    rm -f /tmp/lmd-test-worker-busy.flag
+    wait "$worker_pid" 2>/dev/null
+}
+
+@test "lmd_scan.sh throttles md5/sha256/hex worker PIDs immediately after backgrounding" {
+    run grep -c '_scan_throttle_worker_pid "\$!"' "$LMD_INSTALL/internals/lmd_scan.sh"
+    assert_success
+    [ "$output" -ge 3 ]
+}
