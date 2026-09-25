@@ -1048,9 +1048,23 @@ class MaldetAPI:
         if route.startswith("/api/scan/") and method == "GET":
             scan_id = route.split("/")[3]
             try:
-                return 200, safe_json_report(scan_id)
+                data = safe_json_report(scan_id)
             except Exception as e:
                 return 404, {"error": str(e)}
+            # maldet --json-report falls back to the active scan list when the
+            # scan hasn't finished yet (no final report exists). Unwrap the
+            # matching entry so the UI shows a clean summary instead of a raw
+            # dump of the entire active-scans array.
+            if isinstance(data, dict) and "active_scans" in data:
+                active = data.get("active_scans") or []
+                match = next(
+                    (s for s in active if s.get("scan_id") == scan_id or s.get("scanid") == scan_id),
+                    None,
+                )
+                if match:
+                    return 200, match
+                return 404, {"error": "Scan " + scan_id + " is still running; no report is available yet"}
+            return 200, data
 
         if route == "/api/scan" and method == "POST":
             return MaldetAPI._handle_scan_start(body or {})
