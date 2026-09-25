@@ -1398,7 +1398,7 @@
     function openScheduleModal(id) {
         closeScheduleModal();
         var existing = id ? _schedulesCache[id] : null;
-        var s = existing || { name: '', path: '', scan_type: 'recent', days: 1, frequency: 'daily',
+        var s = existing || { name: '', path: '/home', scan_type: 'recent', days: 1, frequency: 'daily',
             hour: 3, minute: 0, weekday: 0, cron_expr: '', enabled: true };
         var modal = document.createElement('div');
         modal.id = 'schedule-modal';
@@ -1412,7 +1412,7 @@
         h += '<div class="form-group"><label class="form-label">' + tr('Schedule name') + '</label>' +
             '<input type="text" class="form-input" id="sch_name" value="' + escapeHtml(s.name) + '" placeholder="' + escapeHtml(tr('Schedule name')) + '"></div>';
         h += '<div class="form-group"><label class="form-label">' + tr('Path') + '</label><div class="path-picker-row">' +
-            '<input type="text" class="form-input" id="sch_path" value="' + escapeHtml(s.path) + '" placeholder="/home">' +
+            '<input type="text" class="form-input" id="sch_path" value="' + escapeHtml(s.path) + '" placeholder="/var/www">' +
             '<button type="button" class="btn btn-ghost" data-action="folder-picker" data-target="sch_path">' + tr('Browse') + '</button></div></div>';
         h += '<div class="form-group"><label class="form-label">' + tr('Scan type') + '</label>' +
             '<select class="form-input" id="sch_scan_type"><option value="recent"' + (s.scan_type === 'recent' ? ' selected' : '') + '>' +
