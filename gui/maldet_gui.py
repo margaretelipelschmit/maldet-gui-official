@@ -691,6 +691,110 @@ def write_config_change(path, key, value):
 
 
 # ---------------------------------------------------------------------------
+# Utility: scheduled scans (Agendamentos)
+# ---------------------------------------------------------------------------
+
+SCHEDULES_FILE = "gui.schedules.json"
+MANAGED_CRON_PATH = "/etc/cron.d/maldet-gui-schedules"
+_CRON_FIELD_RE = re.compile(r'^[\d*/,\-]+$')
+
+# Read-only display of the maldet-related cron files already installed by
+# install.sh, so admins can see the full picture (native cron.daily/weekly
+# jobs) alongside the GUI-managed schedules below.
+KNOWN_CRON_FILES = [
+    ("Daily scan & maintenance", "/etc/cron.daily/maldet"),
+    ("Weekly signature watchdog", "/etc/cron.weekly/maldet-watchdog"),
+    ("Public path scan trigger", "/etc/cron.d/maldet_pub"),
+    ("Independent signature updates", "/etc/cron.d/maldet-sigup"),
+    ("GUI-managed scheduled scans", MANAGED_CRON_PATH),
+]
+
+
+def get_schedules_path():
+    return os.path.join(get_base_dir(), SCHEDULES_FILE)
+
+
+def get_managed_cron_path():
+    return MANAGED_CRON_PATH
+
+
+def load_schedules():
+    """Load the list of GUI-managed scheduled scans."""
+    path = get_schedules_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            data = json.load(fh)
+        schedules = data.get("schedules", []) if isinstance(data, dict) else data
+        return schedules if isinstance(schedules, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save_schedules(schedules):
+    """Persist the schedule list atomically."""
+    path = get_schedules_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp.%d" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"schedules": schedules}, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, path)
+
+
+def _validate_cron_expr(expr):
+    parts = expr.split()
+    return len(parts) == 5 and all(_CRON_FIELD_RE.match(p) for p in parts)
+
+
+def build_schedule_cron_line(schedule):
+    """Build a single crontab line (5-field timing + command) for a schedule."""
+    maldet_bin = os.path.join(get_base_dir(), "maldet")
+    path = schedule.get("path", "")
+    if schedule.get("scan_type") == "recent":
+        cmd_args = "-b -r %s %s" % (path, schedule.get("days", 1))
+    else:
+        cmd_args = "-b -a %s" % path
+    frequency = schedule.get("frequency", "daily")
+    if frequency == "custom":
+        timing = schedule.get("cron_expr") or "0 3 * * *"
+    elif frequency == "weekly":
+        timing = "%d %d * * %d" % (
+            int(schedule.get("minute", 0)), int(schedule.get("hour", 3)), int(schedule.get("weekday", 0)))
+    else:
+        timing = "%d %d * * *" % (int(schedule.get("minute", 0)), int(schedule.get("hour", 3)))
+    line = "%s root %s %s >> /dev/null 2>&1  # gui-schedule:%s %s" % (
+        timing, maldet_bin, cmd_args, schedule.get("id", ""), schedule.get("name", ""))
+    if not schedule.get("enabled", True):
+        line = "# [disabled] " + line
+    return line
+
+
+def write_managed_cron_file(schedules):
+    """Regenerate the GUI-managed cron.d file from the current schedule list."""
+    try:
+        lines = [
+            "# Managed by Maldet GUI (Agendamentos) - do not edit manually.\n",
+            "# This file is regenerated automatically whenever schedules change.\n",
+        ]
+        if not schedules:
+            lines.append("# No schedules configured yet.\n")
+        for schedule in schedules:
+            lines.append(build_schedule_cron_line(schedule) + "\n")
+        cron_path = get_managed_cron_path()
+        os.makedirs(os.path.dirname(cron_path), exist_ok=True)
+        tmp = cron_path + ".tmp.%d" % os.getpid()
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, cron_path)
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
+
+
+# ---------------------------------------------------------------------------
 # Utility: quarantine management
 # ---------------------------------------------------------------------------
 
@@ -1123,7 +1227,153 @@ class MaldetAPI:
             # Return most recent 100 entries
             return 200, {"hits": hits[-100:], "count": len(hits)}
 
+        # ---- Scheduled scans (Agendamentos) ----
+        if route == "/api/schedules" and method == "GET":
+            return 200, {"schedules": load_schedules(), "cron_path": get_managed_cron_path()}
+
+        if route == "/api/schedules" and method == "POST":
+            return MaldetAPI._save_schedule(None, body or {})
+
+        if route == "/api/schedules/cron" and method == "GET":
+            return MaldetAPI._schedules_cron_files()
+
+        if route.startswith("/api/schedules/") and method == "GET":
+            parts = route.split("/")
+            if len(parts) == 5 and parts[4] == "reports":
+                return MaldetAPI._schedule_reports(parts[3])
+
+        if route.startswith("/api/schedules/") and method == "PUT":
+            schedule_id = route.split("/")[3]
+            return MaldetAPI._save_schedule(schedule_id, body or {})
+
+        if route.startswith("/api/schedules/") and method == "DELETE":
+            schedule_id = route.split("/")[3]
+            return MaldetAPI._delete_schedule(schedule_id)
+
         return 404, {"error": "Not found: " + method + " " + route}
+
+    @staticmethod
+    def _save_schedule(schedule_id, data):
+        """Create (schedule_id=None) or update a GUI-managed scheduled scan."""
+        name = str(data.get("name", "")).strip()
+        path = str(data.get("path", "")).strip()
+        scan_type = data.get("scan_type", "recent")
+        frequency = data.get("frequency", "daily")
+        cron_expr = str(data.get("cron_expr", "")).strip()
+        enabled = bool(data.get("enabled", True))
+
+        if not name:
+            return 400, {"error": "Schedule name is required"}
+        if not path:
+            return 400, {"error": "Scan path is required"}
+        if scan_type not in ("all", "recent"):
+            return 400, {"error": "scan_type must be 'all' or 'recent'"}
+        if frequency not in ("daily", "weekly", "custom"):
+            return 400, {"error": "frequency must be 'daily', 'weekly' or 'custom'"}
+
+        try:
+            days = int(data.get("days", 1))
+        except (TypeError, ValueError):
+            return 400, {"error": "days must be a number"}
+        if scan_type == "recent" and days < 1:
+            return 400, {"error": "Recent scans require a positive number of days"}
+
+        try:
+            hour = int(data.get("hour", 3))
+            minute = int(data.get("minute", 0))
+            weekday = int(data.get("weekday", 0))
+        except (TypeError, ValueError):
+            return 400, {"error": "hour, minute and weekday must be numbers"}
+        if not (0 <= hour <= 23) or not (0 <= minute <= 59):
+            return 400, {"error": "Hour must be 0-23 and minute 0-59"}
+        if frequency == "weekly" and not (0 <= weekday <= 6):
+            return 400, {"error": "Weekday must be 0 (Sunday) to 6 (Saturday)"}
+        if frequency == "custom" and not _validate_cron_expr(cron_expr):
+            return 400, {"error": "Invalid custom cron expression (expected 5 whitespace-separated fields)"}
+
+        real_path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isdir(real_path):
+            return 400, {"error": "Scan directory does not exist: " + real_path}
+        real_path = os.path.realpath(real_path)
+
+        schedules = load_schedules()
+        now = time.time()
+        if schedule_id:
+            existing = next((s for s in schedules if s.get("id") == schedule_id), None)
+            if not existing:
+                return 404, {"error": "Schedule not found: " + schedule_id}
+        else:
+            schedule_id = "sch_%d_%s" % (int(now), secrets.token_hex(3))
+            existing = {"id": schedule_id, "created_at": now}
+
+        existing.update({
+            "name": name, "path": real_path, "scan_type": scan_type, "days": days,
+            "frequency": frequency, "hour": hour, "minute": minute, "weekday": weekday,
+            "cron_expr": cron_expr if frequency == "custom" else "",
+            "enabled": enabled, "updated_at": now,
+        })
+        ids = [s.get("id") for s in schedules]
+        if schedule_id not in ids:
+            schedules.append(existing)
+        else:
+            schedules = [existing if s.get("id") == schedule_id else s for s in schedules]
+
+        save_schedules(schedules)
+        ok, err = write_managed_cron_file(schedules)
+        if not ok:
+            return 500, {"error": "Schedule saved but failed to update cron file: " + err}
+        return 200, {"message": "Schedule saved", "schedule": existing}
+
+    @staticmethod
+    def _delete_schedule(schedule_id):
+        schedules = load_schedules()
+        remaining = [s for s in schedules if s.get("id") != schedule_id]
+        if len(remaining) == len(schedules):
+            return 404, {"error": "Schedule not found: " + schedule_id}
+        save_schedules(remaining)
+        ok, err = write_managed_cron_file(remaining)
+        if not ok:
+            return 500, {"error": "Schedule deleted but failed to update cron file: " + err}
+        return 200, {"message": "Schedule deleted"}
+
+    @staticmethod
+    def _schedule_reports(schedule_id):
+        """Return the most recent scan reports whose path matches a schedule."""
+        schedules = load_schedules()
+        schedule = next((s for s in schedules if s.get("id") == schedule_id), None)
+        if not schedule:
+            return 404, {"error": "Schedule not found: " + schedule_id}
+        try:
+            data = safe_json_list()
+        except Exception as exc:
+            return 503, {"error": "Unable to load scan reports: " + str(exc)}
+        target = os.path.realpath(schedule.get("path", ""))
+        reports = [
+            r for r in data.get("reports", [])
+            if isinstance(r, dict) and os.path.realpath(str(r.get("path", ""))) == target
+        ]
+        reports.sort(key=lambda r: r.get("started_epoch", 0), reverse=True)
+        return 200, {"schedule": schedule, "reports": reports[:20]}
+
+    @staticmethod
+    def _schedules_cron_files():
+        """Read-only view of every maldet-related cron file for the Agendamentos page."""
+        files = []
+        for label, cron_path in KNOWN_CRON_FILES:
+            exists = os.path.isfile(cron_path)
+            content = ""
+            error = None
+            if exists:
+                try:
+                    with open(cron_path, encoding="utf-8", errors="replace") as fh:
+                        content = fh.read()
+                except OSError as exc:
+                    error = str(exc)
+            entry = {"label": label, "path": cron_path, "exists": exists, "content": content}
+            if error:
+                entry["error"] = error
+            files.append(entry)
+        return 200, {"files": files}
 
     @staticmethod
     def _handle_scan_start(data):

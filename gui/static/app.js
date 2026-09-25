@@ -203,7 +203,44 @@
             'QUARANTINE OPTIONS': 'Opções de quarentena', 'MONITORING OPTIONS': 'Opções de monitoramento',
             'STATISTICAL ELK COLLECT': 'Coleta estatística ELK', 'SESSION FORMAT': 'Formato de sessão',
             'STATISTICAL ANALYSIS': 'Análise estatística', 'SCAN PROGRESS LOGGING': 'Registro de progresso do scan',
-            'POST-SCAN HOOKS': 'Hooks pós-scan',            'Save ignore list': 'Salvar lista de exclusão',
+            'POST-SCAN HOOKS': 'Hooks pós-scan',
+            'Schedules': 'Agendamentos',
+            'Scheduled Scans': 'Scans agendados',
+            'New Schedule': 'Novo agendamento',
+            'Edit Schedule': 'Editar agendamento',
+            'Cron Jobs': 'Tarefas cron',
+            'System-managed cron jobs installed by the installer (read-only). GUI-managed schedules are listed separately below.':
+                'Tarefas cron do sistema instaladas pelo instalador (somente leitura). Os agendamentos gerenciados pela GUI estão listados separadamente abaixo.',
+            'View raw file': 'Ver arquivo bruto',
+            'Hide raw file': 'Ocultar arquivo bruto',
+            'File not installed': 'Arquivo não instalado',
+            'No scheduled scans yet. Click "New Schedule" to create one.': 'Nenhum scan agendado ainda. Clique em "Novo agendamento" para criar um.',
+            'Name': 'Nome', 'Path': 'Caminho', 'Schedule': 'Frequência', 'Status': 'Status',
+            'Enabled': 'Habilitado', 'Disabled': 'Desabilitado',
+            'Edit': 'Editar', 'Delete': 'Excluir', 'Enable': 'Habilitar', 'Disable': 'Desabilitar',
+            'View Reports': 'Ver relatórios', 'Reports for': 'Relatórios de',
+            'No reports found yet for this schedule.': 'Nenhum relatório encontrado ainda para este agendamento.',
+            'Delete this schedule? Its cron entry will be removed.': 'Excluir este agendamento? A entrada do cron será removida.',
+            'Schedule saved': 'Agendamento salvo', 'Schedule deleted': 'Agendamento excluído',
+            'Schedule name': 'Nome do agendamento', 'Scan type': 'Tipo de scan',
+            'Full scan (all files)': 'Scan completo (todos os arquivos)',
+            'Recent files only': 'Somente arquivos recentes',
+            'Modified within (days)': 'Modificados nos últimos (dias)',
+            'Frequency': 'Frequência', 'Daily': 'Diário', 'Weekly': 'Semanal', 'Custom (cron expression)': 'Personalizado (expressão cron)',
+            'Time': 'Horário', 'Hour': 'Hora', 'Minute': 'Minuto', 'Day of week': 'Dia da semana',
+            'Sunday': 'Domingo', 'Monday': 'Segunda-feira', 'Tuesday': 'Terça-feira', 'Wednesday': 'Quarta-feira',
+            'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado',
+            'Custom cron expression': 'Expressão cron personalizada',
+            '5 fields: minute hour day month weekday (e.g. "0 3 * * *")': '5 campos: minuto hora dia mês dia-da-semana (ex.: "0 3 * * *")',
+            'Enabled (schedule will run)': 'Habilitado (o agendamento será executado)',
+            'Save Schedule': 'Salvar agendamento', 'Saving...': 'Salvando...',
+            'Daily at': 'Diariamente às', 'Weekly on': 'Semanalmente em', 'at': 'às',
+            'Custom:': 'Personalizado:',
+            'Daily scan & maintenance': 'Scan diário e manutenção',
+            'Weekly signature watchdog': 'Verificação semanal de assinaturas',
+            'Public path scan trigger': 'Gatilho de scan de caminhos públicos',
+            'Independent signature updates': 'Atualizações independentes de assinaturas',
+            'GUI-managed scheduled scans': 'Scans agendados gerenciados pela GUI',            'Save ignore list': 'Salvar lista de exclusão',
             'Ignore list saved': 'Lista de exclusão salva',
             'Ignore list save failed: ': 'Falha ao salvar a lista de exclusão: ',
             'Test Alerts': 'Testar alertas', 'Type': 'Tipo', 'Channel': 'Canal',
@@ -426,7 +463,7 @@
                 quarantine: tr('Quarantine'), reports: tr('Reports'), monitoring: tr('Monitoring'),
                 updates: tr('Updates'), security: tr('Security'), config: tr('Configuration'), alerts: tr('Test Alerts'),
                 logs: tr('Logs'), ignore: tr('Ignore Lists'), maintenance: tr('Maintenance'), system: tr('System Info'),
-                about: tr('About Maldet')
+                about: tr('About Maldet'), schedules: tr('Schedules')
             };
             document.getElementById('page-title').textContent = titles[name] || name;
             var content = document.getElementById('content');
@@ -486,7 +523,7 @@
                 if (!el) return;
                 var action = el.getAttribute('data-action');
                 if (action === 'start-scan') startScan();
-                else if (action === 'folder-picker') openFolderPicker();
+                else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'));
                 else if (action === 'scan-details') openScanDetails(el.getAttribute('data-id'));
                 else if (action === 'scan-details-close') closeScanDetails();
                 else if (action === 'report-details') openReportDetails(el.getAttribute('data-id'));
@@ -529,6 +566,12 @@
                 else if (action === 'about-refresh') Router.navigate('about');
                 else if (action === 'about-settings') Router.navigate('config');
                 else if (action === 'refresh') Router.navigate(Router.currentPage);
+                else if (action === 'cron-file-toggle') toggleCronFile(el);
+                else if (action === 'schedule-new') openScheduleModal(null);
+                else if (action === 'schedule-edit') openScheduleModal(el.getAttribute('data-id'));
+                else if (action === 'schedule-toggle') scheduleAction(el.getAttribute('data-id'), 'toggle');
+                else if (action === 'schedule-delete') scheduleAction(el.getAttribute('data-id'), 'delete');
+                else if (action === 'schedule-reports') openScheduleReports(el.getAttribute('data-id'));
             });
             document.getElementById('content').addEventListener('change', function(e) {
                 if (e.target && e.target.id === 'scan_type') updateScanTypeFields(e.target.value);
@@ -627,16 +670,19 @@
             escapeHtml(value) + '</code>' + detail + '. <span>No scan has started yet.</span>';
     }
 
+    var _folderPickerTargetId = 'scan_path';
+
     function closeFolderPicker() {
         var modal = document.getElementById('folder-picker-modal');
         if (modal) modal.remove();
     }
 
     function selectFolder(path) {
-        var input = document.getElementById('scan_path');
+        var input = document.getElementById(_folderPickerTargetId);
         if (input) {
             input.value = path;
-            updateScanSummary();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            if (_folderPickerTargetId === 'scan_path') updateScanSummary();
         }
         closeFolderPicker();
     }
@@ -667,7 +713,8 @@
         });
     }
 
-    function openFolderPicker() {
+    function openFolderPicker(targetId) {
+        _folderPickerTargetId = targetId || 'scan_path';
         closeFolderPicker();
         var modal = document.createElement('div');
         modal.id = 'folder-picker-modal';
@@ -687,7 +734,8 @@
             else if (action === 'folder-enter') browseFolder(el.getAttribute('data-path'));
             else if (action === 'folder-select') selectFolder(el.getAttribute('data-path'));
         });
-        browseFolder(document.getElementById('scan_path').value.trim() || '/');
+        var targetInput = document.getElementById(_folderPickerTargetId);
+        browseFolder((targetInput && targetInput.value.trim()) || '/');
     }
 
     function switchScannerTab(tab) {
@@ -1224,6 +1272,265 @@
     function stopScan(id) {
         if (!confirm('Stop scan ' + id + '?')) return;
         scanAction(id, 'stop');
+    }
+
+    // ----- Schedules (Agendamentos) -----
+    var WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+    function humanizeSchedule(s) {
+        var time = pad2(s.hour) + ':' + pad2(s.minute);
+        if (s.frequency === 'weekly') {
+            return tr('Weekly on') + ' ' + tr(WEEKDAY_NAMES[s.weekday] || WEEKDAY_NAMES[0]) + ' ' + tr('at') + ' ' + time;
+        }
+        if (s.frequency === 'custom') {
+            return tr('Custom:') + ' ' + escapeHtml(s.cron_expr || '');
+        }
+        return tr('Daily at') + ' ' + time;
+    }
+
+    function renderSchedules() {
+        return Promise.all([API.get('/schedules'), API.get('/schedules/cron')]).then(function(results) {
+            var schedules = results[0].schedules || [];
+            var cronFiles = results[1].files || [];
+            _schedulesCache = {};
+            schedules.forEach(function(s) { _schedulesCache[s.id] = s; });
+            var h = '<div class="schedules-page">';
+
+            h += '<div class="card"><div class="card-header"><span class="card-title">' + tr('Cron Jobs') +
+                '</span><button class="btn btn-ghost btn-sm" data-action="refresh">🔄</button></div>';
+            h += '<p class="form-help">' + tr('System-managed cron jobs installed by the installer (read-only). GUI-managed schedules are listed separately below.') + '</p>';
+            h += '<div class="cron-file-list">';
+            cronFiles.forEach(function(file, idx) {
+                var panelId = 'cron-file-' + idx;
+                h += '<div class="cron-file-item"><div class="cron-file-head"><code>' + escapeHtml(file.path) + '</code>' +
+                    '<span class="cron-file-label">' + escapeHtml(tr(file.label)) + '</span>';
+                if (file.exists) {
+                    h += '<button type="button" class="btn btn-ghost btn-sm" data-action="cron-file-toggle" data-target="' +
+                        escapeHtml(panelId) + '">' + tr('View raw file') + '</button>';
+                } else {
+                    h += '<span class="cron-file-missing">' + tr('File not installed') + '</span>';
+                }
+                h += '</div>';
+                if (file.exists) {
+                    h += '<pre class="cron-file-content" id="' + escapeHtml(panelId) + '" style="display:none;">' +
+                        escapeHtml(file.content || '') + '</pre>';
+                }
+                h += '</div>';
+            });
+            h += '</div></div>';
+
+            h += '<div class="card"><div class="card-header"><span class="card-title">' + tr('Scheduled Scans') +
+                ' (' + schedules.length + ')</span><button class="btn btn-primary btn-sm" data-action="schedule-new">+ ' +
+                tr('New Schedule') + '</button></div>';
+            if (schedules.length === 0) {
+                h += '<p style="padding:12px;color:var(--text-muted);">' + tr('No scheduled scans yet. Click "New Schedule" to create one.') + '</p>';
+            } else {
+                h += '<div class="table-scroll"><table><thead><tr><th>' + tr('Name') + '</th><th>' + tr('Path') +
+                    '</th><th>' + tr('Scan type') + '</th><th>' + tr('Schedule') + '</th><th>' + tr('Status') +
+                    '</th><th>' + tr('Actions') + '</th></tr></thead><tbody>';
+                schedules.forEach(function(s) {
+                    var typeLabel = s.scan_type === 'recent' ?
+                        (tr('Recent files only') + ' (' + s.days + 'd)') : tr('Full scan (all files)');
+                    h += '<tr><td>' + escapeHtml(s.name) + '</td><td style="font-size:12px;">' + escapeHtml(s.path) + '</td>' +
+                        '<td>' + escapeHtml(typeLabel) + '</td><td>' + humanizeSchedule(s) + '</td>' +
+                        '<td><span class="badge ' + (s.enabled ? 'badge-success' : 'badge-muted') + '">' +
+                        tr(s.enabled ? 'Enabled' : 'Disabled') + '</span></td>';
+                    h += '<td><button class="btn btn-ghost btn-sm" data-action="schedule-edit" data-id="' + escapeHtml(s.id) + '">' + tr('Edit') + '</button> ' +
+                        '<button class="btn btn-ghost btn-sm" data-action="schedule-toggle" data-id="' + escapeHtml(s.id) + '">' +
+                        tr(s.enabled ? 'Disable' : 'Enable') + '</button> ' +
+                        '<button class="btn btn-ghost btn-sm" data-action="schedule-reports" data-id="' + escapeHtml(s.id) + '">' + tr('View Reports') + '</button> ' +
+                        '<button class="btn btn-danger btn-sm" data-action="schedule-delete" data-id="' + escapeHtml(s.id) + '">' + tr('Delete') + '</button></td></tr>';
+                });
+                h += '</tbody></table></div>';
+            }
+            h += '</div></div>';
+            return h;
+        });
+    }
+
+    function toggleCronFile(button) {
+        var panel = document.getElementById(button.getAttribute('data-target'));
+        if (!panel) return;
+        var show = panel.style.display === 'none';
+        panel.style.display = show ? 'block' : 'none';
+        button.textContent = tr(show ? 'Hide raw file' : 'View raw file');
+    }
+
+    function scheduleAction(id, action) {
+        var schedule = _schedulesCache && _schedulesCache[id];
+        if (action === 'toggle' && schedule) {
+            API.put('/schedules/' + encodeURIComponent(id), Object.assign({}, schedule, { enabled: !schedule.enabled }))
+                .then(function() { toast(tr('Schedule saved'), 'success'); Router.navigate('schedules'); })
+                .catch(function(e) { toast('Error: ' + e.message, 'error'); });
+            return;
+        }
+        if (action === 'delete') {
+            if (!confirm(tr('Delete this schedule? Its cron entry will be removed.'))) return;
+            API.del('/schedules/' + encodeURIComponent(id))
+                .then(function() { toast(tr('Schedule deleted'), 'success'); Router.navigate('schedules'); })
+                .catch(function(e) { toast('Error: ' + e.message, 'error'); });
+        }
+    }
+
+    var _schedulesCache = {};
+
+    function closeScheduleModal() {
+        var modal = document.getElementById('schedule-modal');
+        if (modal) modal.remove();
+    }
+
+    function updateScheduleFormFields() {
+        var scanType = document.getElementById('sch_scan_type');
+        var frequency = document.getElementById('sch_frequency');
+        var daysGroup = document.getElementById('sch_days_group');
+        var weekdayGroup = document.getElementById('sch_weekday_group');
+        var cronGroup = document.getElementById('sch_cron_group');
+        var timeGroup = document.getElementById('sch_time_group');
+        if (daysGroup) daysGroup.style.display = (scanType && scanType.value === 'recent') ? 'block' : 'none';
+        var freq = frequency ? frequency.value : 'daily';
+        if (weekdayGroup) weekdayGroup.style.display = freq === 'weekly' ? 'block' : 'none';
+        if (cronGroup) cronGroup.style.display = freq === 'custom' ? 'block' : 'none';
+        if (timeGroup) timeGroup.style.display = freq === 'custom' ? 'none' : 'block';
+    }
+
+    function openScheduleModal(id) {
+        closeScheduleModal();
+        var existing = id ? _schedulesCache[id] : null;
+        var s = existing || { name: '', path: '', scan_type: 'recent', days: 1, frequency: 'daily',
+            hour: 3, minute: 0, weekday: 0, cron_expr: '', enabled: true };
+        var modal = document.createElement('div');
+        modal.id = 'schedule-modal';
+        modal.className = 'modal-backdrop';
+        var weekdayOptions = WEEKDAY_NAMES.map(function(name, idx) {
+            return '<option value="' + idx + '"' + (idx === s.weekday ? ' selected' : '') + '>' + escapeHtml(tr(name)) + '</option>';
+        }).join('');
+        var h = '<div class="modal schedule-modal"><div class="modal-header"><span class="modal-title">' +
+            tr(existing ? 'Edit Schedule' : 'New Schedule') + '</span><button class="modal-close" data-action="schedule-modal-close">×</button></div>';
+        h += '<div class="modal-body">';
+        h += '<div class="form-group"><label class="form-label">' + tr('Schedule name') + '</label>' +
+            '<input type="text" class="form-input" id="sch_name" value="' + escapeHtml(s.name) + '" placeholder="' + escapeHtml(tr('Schedule name')) + '"></div>';
+        h += '<div class="form-group"><label class="form-label">' + tr('Path') + '</label><div class="path-picker-row">' +
+            '<input type="text" class="form-input" id="sch_path" value="' + escapeHtml(s.path) + '" placeholder="/home">' +
+            '<button type="button" class="btn btn-ghost" data-action="folder-picker" data-target="sch_path">' + tr('Browse') + '</button></div></div>';
+        h += '<div class="form-group"><label class="form-label">' + tr('Scan type') + '</label>' +
+            '<select class="form-input" id="sch_scan_type"><option value="recent"' + (s.scan_type === 'recent' ? ' selected' : '') + '>' +
+            tr('Recent files only') + '</option><option value="all"' + (s.scan_type === 'all' ? ' selected' : '') + '>' +
+            tr('Full scan (all files)') + '</option></select></div>';
+        h += '<div class="form-group" id="sch_days_group"><label class="form-label">' + tr('Modified within (days)') + '</label>' +
+            '<input type="number" min="1" class="form-input" id="sch_days" value="' + escapeHtml(s.days) + '"></div>';
+        h += '<div class="form-group"><label class="form-label">' + tr('Frequency') + '</label>' +
+            '<select class="form-input" id="sch_frequency"><option value="daily"' + (s.frequency === 'daily' ? ' selected' : '') + '>' +
+            tr('Daily') + '</option><option value="weekly"' + (s.frequency === 'weekly' ? ' selected' : '') + '>' +
+            tr('Weekly') + '</option><option value="custom"' + (s.frequency === 'custom' ? ' selected' : '') + '>' +
+            tr('Custom (cron expression)') + '</option></select></div>';
+        h += '<div class="form-group" id="sch_time_group"><label class="form-label">' + tr('Time') + '</label>' +
+            '<div class="schedule-time-row"><input type="number" min="0" max="23" class="form-input" id="sch_hour" value="' + escapeHtml(s.hour) + '" placeholder="' + tr('Hour') + '">' +
+            '<input type="number" min="0" max="59" class="form-input" id="sch_minute" value="' + escapeHtml(s.minute) + '" placeholder="' + tr('Minute') + '"></div></div>';
+        h += '<div class="form-group" id="sch_weekday_group"><label class="form-label">' + tr('Day of week') + '</label>' +
+            '<select class="form-input" id="sch_weekday">' + weekdayOptions + '</select></div>';
+        h += '<div class="form-group" id="sch_cron_group"><label class="form-label">' + tr('Custom cron expression') + '</label>' +
+            '<input type="text" class="form-input" id="sch_cron_expr" value="' + escapeHtml(s.cron_expr || '') + '" placeholder="0 3 * * *">' +
+            '<small class="form-help">' + tr('5 fields: minute hour day month weekday (e.g. "0 3 * * *")') + '</small></div>';
+        h += '<div class="form-group"><label style="font-size:13px;"><input type="checkbox" id="sch_enabled"' +
+            (s.enabled ? ' checked' : '') + '> ' + tr('Enabled (schedule will run)') + '</label></div>';
+        h += '</div><div class="modal-footer"><button class="btn btn-ghost" data-action="schedule-modal-close">' + tr('Cancel') + '</button>' +
+            '<button class="btn btn-primary" id="schedule-save-btn" data-action="schedule-save" data-id="' + escapeHtml(id || '') + '">' + tr('Save Schedule') + '</button></div></div>';
+        modal.innerHTML = h;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', function(e) {
+            var el = e.target.closest('[data-action]');
+            if (!el) return;
+            var action = el.getAttribute('data-action');
+            if (action === 'schedule-modal-close') closeScheduleModal();
+            else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'));
+            else if (action === 'schedule-save') saveScheduleForm(el.getAttribute('data-id') || null);
+        });
+        modal.addEventListener('change', function(e) {
+            if (e.target && (e.target.id === 'sch_scan_type' || e.target.id === 'sch_frequency')) updateScheduleFormFields();
+        });
+        updateScheduleFormFields();
+    }
+
+    function saveScheduleForm(id) {
+        var name = document.getElementById('sch_name').value.trim();
+        var path = document.getElementById('sch_path').value.trim();
+        var scanType = document.getElementById('sch_scan_type').value;
+        var days = document.getElementById('sch_days').value;
+        var frequency = document.getElementById('sch_frequency').value;
+        var hour = document.getElementById('sch_hour').value;
+        var minute = document.getElementById('sch_minute').value;
+        var weekday = document.getElementById('sch_weekday').value;
+        var cronExpr = document.getElementById('sch_cron_expr').value.trim();
+        var enabled = document.getElementById('sch_enabled').checked;
+        if (!name) { toast('Enter a schedule name', 'error'); return; }
+        if (!path) { toast('Enter a scan path', 'error'); return; }
+        var payload = {
+            name: name, path: path, scan_type: scanType, days: parseInt(days, 10) || 1,
+            frequency: frequency, hour: parseInt(hour, 10) || 0, minute: parseInt(minute, 10) || 0,
+            weekday: parseInt(weekday, 10) || 0, cron_expr: cronExpr, enabled: enabled,
+        };
+        var button = document.getElementById('schedule-save-btn');
+        if (button) { button.disabled = true; button.textContent = tr('Saving...'); }
+        var request = id ? API.put('/schedules/' + encodeURIComponent(id), payload) : API.post('/schedules', payload);
+        request.then(function() {
+            toast(tr('Schedule saved'), 'success');
+            closeScheduleModal();
+            Router.navigate('schedules');
+        }).catch(function(e) {
+            toast('Error: ' + e.message, 'error');
+            if (button) { button.disabled = false; button.textContent = tr('Save Schedule'); }
+        });
+    }
+
+    function closeScheduleReports() {
+        var modal = document.getElementById('schedule-reports-modal');
+        if (modal) modal.remove();
+    }
+
+    function openScheduleReports(id) {
+        var old = document.getElementById('schedule-reports-modal');
+        if (old) old.remove();
+        var modal = document.createElement('div');
+        modal.id = 'schedule-reports-modal';
+        modal.className = 'modal-backdrop';
+        modal.innerHTML = '<div class="modal report-details-modal"><div class="modal-header"><span class="modal-title">' +
+            tr('Reports for') + '</span><button class="modal-close" data-action="schedule-reports-close">×</button></div>' +
+            '<div class="modal-body"><div class="loading">' + tr('Loading...') + '</div></div>' +
+            '<div class="modal-footer"><button class="btn btn-ghost" data-action="schedule-reports-close">' + tr('Close') + '</button></div></div>';
+        document.body.appendChild(modal);
+        modal.addEventListener('click', function(e) {
+            var el = e.target.closest('[data-action]');
+            if (!el) return;
+            var action = el.getAttribute('data-action');
+            if (action === 'schedule-reports-close') closeScheduleReports();
+            else if (action === 'report-details') openReportDetails(el.getAttribute('data-id'));
+        });
+        API.get('/schedules/' + encodeURIComponent(id) + '/reports').then(function(data) {
+            var body = modal.querySelector('.modal-body');
+            if (!body) return;
+            var title = modal.querySelector('.modal-title');
+            if (title) title.textContent = tr('Reports for') + ' ' + (data.schedule ? data.schedule.name : id);
+            var reports = data.reports || [];
+            if (!reports.length) {
+                body.innerHTML = '<p style="color:var(--text-muted);">' + tr('No reports found yet for this schedule.') + '</p>';
+                return;
+            }
+            var h = '<table><thead><tr><th>' + tr('Scan ID') + '</th><th>' + tr('Started') + '</th><th>' +
+                tr('Files') + '</th><th>' + tr('Hits') + '</th><th>' + tr('Actions') + '</th></tr></thead><tbody>';
+            reports.forEach(function(r) {
+                var scanId = String(r.scan_id || '');
+                h += '<tr><td><code>' + escapeHtml(scanId) + '</code></td><td>' + fmtTime(r.started_epoch) + '</td>' +
+                    '<td>' + (Number(r.total_files) || 0) + '</td><td>' + (Number(r.total_hits) || 0) + '</td>' +
+                    '<td><button class="btn btn-primary btn-sm" data-action="report-details" data-id="' + escapeHtml(scanId) + '">' + tr('Show Report') + '</button></td></tr>';
+            });
+            h += '</tbody></table>';
+            body.innerHTML = h;
+        }).catch(function(err) {
+            var body = modal.querySelector('.modal-body');
+            if (body) body.innerHTML = '<p style="color:var(--danger);">' + escapeHtml(err.message) + '</p>';
+        });
     }
 
     // ----- Monitoring -----
@@ -1987,6 +2294,7 @@
     Router.register('quarantine', renderQuarantine);
     Router.register('reports', renderReports);
     Router.register('monitoring', renderMonitoring);
+    Router.register('schedules', renderSchedules);
     Router.register('updates', renderUpdates);
     Router.register('security', renderSecurityPage);
     Router.register('config', renderConfig);
