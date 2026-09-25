@@ -897,6 +897,14 @@ scan() {
 	# Actual process PID — in background mode (-b), $$ is the dead parent;
 	# BASHPID reflects the real forked child PID for lifecycle liveness checks.
 	_scan_pid="${BASHPID:-$$}"
+	# Renice/ionice/cpulimit the scan orchestrator process itself, not just
+	# its spawned hash/hex workers: this top-level process does real
+	# CPU-bound work directly (file list handling, worker chunk
+	# distribution/collection, hex/csig bookkeeping) that previously ran at
+	# default priority regardless of scan_cpunice/scan_ionice/scan_cpulimit.
+	# monitor_forks=0 since each worker already gets its own independent
+	# cpulimit watcher (see _scan_throttle_worker_pid call sites below).
+	_scan_throttle_worker_pid "$_scan_pid" 0
 	# Continue mode: use checkpoint scanid instead of fresh one
 	if [ -n "${_continue_scanid:-}" ]; then
 		scanid="$_continue_scanid"

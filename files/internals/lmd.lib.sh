@@ -96,8 +96,11 @@ _build_nice_command() {
 	fi
 }
 
-# _scan_throttle_worker_pid pid — apply scan_cpunice/scan_ionice/scan_cpulimit
-# to an already-running background PID.
+# _scan_throttle_worker_pid pid [monitor_forks] — apply
+# scan_cpunice/scan_ionice/scan_cpulimit to an already-running background
+# PID. monitor_forks defaults to 1 (cpulimit -m); pass 0 to throttle only
+# the given PID itself, not its descendants (see the top-level-scan-process
+# case below).
 #
 # $nice_command only works as an exec PREFIX for external binaries (find,
 # clamscan, yara, inotifywait); it cannot throttle the native scan engine's
@@ -113,8 +116,20 @@ _build_nice_command() {
 # private child (no cross-scan sharing), so no holder refcounting is
 # needed, and cpulimit's "-z/--lazy" flag makes its watcher exit on its own
 # the moment the worker finishes - no explicit cleanup required.
+#
+# Also used (with monitor_forks=0) on the top-level scan process itself
+# ($_scan_pid in lmd_scan.sh's scan()): that orchestrator process does
+# significant CPU-bound work directly in its own bash interpreter (building
+# the file list, distributing/collecting worker chunks, hex/csig
+# bookkeeping) which was never covered by any nice/ionice/cpulimit despite
+# the scan log claiming priorities were set "for all operations" - only
+# the individually-spawned workers were. monitor_forks=0 avoids double
+# cpulimit-throttling: the scan process's workers already get their own
+# independent -m watcher via the calls below, so watching the scan
+# process's forks too would throttle the same descendant PIDs twice.
 _scan_throttle_worker_pid() {
 	local _wpid="$1"
+	local _monitor_forks="${2:-1}"
 	[ -n "$_wpid" ] || return 0
 	kill -0 "$_wpid" 2>/dev/null || return 0
 	if [ -n "$nice" ] && [ -f "$nice" ] && [ -n "${scan_cpunice:-}" ]; then
@@ -130,7 +145,9 @@ _scan_throttle_worker_pid() {
 		# work (md5sum/sha256sum/grep/awk) runs in forked children, not
 		# in the worker's own bash PID (which mostly just waits on
 		# xargs) — without it cpulimit would throttle the wrong process.
-		"$cpulimit" -p "$_wpid" -l "$scan_cpulimit" -z -m >/dev/null 2>&1 &
+		local _cl_args=(-p "$_wpid" -l "$scan_cpulimit" -z)
+		[ "$_monitor_forks" = "1" ] && _cl_args+=(-m)
+		"$cpulimit" "${_cl_args[@]}" >/dev/null 2>&1 &
 		disown 2>/dev/null
 	fi
 	return 0

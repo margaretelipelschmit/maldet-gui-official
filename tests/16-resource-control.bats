@@ -409,3 +409,61 @@ _spawn_mock_clamd() {
     assert_success
     [ "$output" -ge 3 ]
 }
+
+# The scan() orchestrator process itself (not just its md5/sha256/hex
+# workers) does real CPU-bound work directly in its own bash interpreter
+# (file list handling, worker chunk distribution/collection, hex/csig
+# bookkeeping). It was previously left completely unthrottled even though
+# the scan log claims "setting nice scheduler priorities for all
+# operations" — only the spawned workers actually got that treatment.
+
+@test "lmd_scan.sh throttles its own top-level scan process, not just workers" {
+    run grep -c '_scan_throttle_worker_pid "\$_scan_pid" 0' "$LMD_INSTALL/internals/lmd_scan.sh"
+    assert_success
+    [ "$output" -ge 1 ]
+}
+
+@test "_scan_throttle_worker_pid renices the top-level scan PID like a worker PID" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    _source_lmd_stack_resource
+    scan_cpunice=19
+    scan_ionice=6
+    scan_cpulimit=0
+
+    sleep 30 &
+    local scan_pid=$!
+
+    _scan_throttle_worker_pid "$scan_pid" 0
+    run bash -c "ps -o ni= -p $scan_pid | tr -d ' '"
+    assert_output "19"
+
+    kill "$scan_pid" 2>/dev/null
+}
+
+@test "_scan_throttle_worker_pid with monitor_forks=0 omits -m from cpulimit (no double-throttling descendants)" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    command -v cpulimit >/dev/null 2>&1 || skip "cpulimit not available"
+    _source_lmd_stack_resource
+    scan_cpunice=19
+    scan_ionice=6
+    scan_cpulimit=50
+
+    : > /tmp/lmd-test-scanproc-busy.flag
+    bash -c 'while [ -f /tmp/lmd-test-scanproc-busy.flag ]; do :; done' &
+    local scan_pid=$!
+
+    _scan_throttle_worker_pid "$scan_pid" 0
+    sleep 0.3
+    # Unlike the worker-PID case (which needs -m since the worker's real
+    # CPU-heavy work runs in a forked child), the top-level scan process's
+    # own direct CPU usage is what we're targeting here — each of its
+    # workers already gets its own independent -m watcher, so watching
+    # descendants here too would throttle the same PIDs twice.
+    run pgrep -f -- "cpulimit -p $scan_pid -l 50 -z -m"
+    assert_failure
+    run pgrep -f -- "cpulimit -p $scan_pid -l 50 -z\$"
+    assert_success
+
+    rm -f /tmp/lmd-test-scanproc-busy.flag
+    wait "$scan_pid" 2>/dev/null
+}
