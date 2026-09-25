@@ -585,6 +585,7 @@
             });
             document.getElementById('content').addEventListener('change', function(e) {
                 if (e.target && e.target.id === 'scan_type') updateScanTypeFields(e.target.value);
+                if (e.target && e.target.id === 'scan_engine') updateScanEngineHelp();
                 if (e.target && e.target.matches('input[data-key]')) updateConfigFieldState(e.target);
             });
             document.getElementById('content').addEventListener('input', function(e) {
@@ -712,15 +713,21 @@
 
     // ----- Scanner -----
     function renderScanner() {
-        return API.get('/config').then(function(data) {
+        return Promise.all([API.get('/config'), API.get('/system')]).then(function(results) {
+            var data = results[0];
+            var sys = (results[1] && results[1].system) || {};
             var cm = {};
             for (var k in data.config) cm[k] = data.config[k].value;
+            var clamavAvailable = sys.clamav_status === 'available';
             var h = '<div class="card"><div class="card-header"><span class="card-title">Scan Configuration</span></div>';
             h += '<div class="tabs"><div class="tab active" data-action="scanner-tab" data-tab="basic">Basic</div>';
             h += '<div class="tab" data-action="scanner-tab" data-tab="adv">Advanced</div></div>';
             h += '<div id="tab-basic"><div class="form-group"><label class="form-label">Scan Type</label>';
             h += '<select class="form-input" id="scan_type"><option value="all">Full Scan</option><option value="recent">Recent Scan</option></select><small class="form-help" id="scan_type_help">Scans all files below the selected path.</small></div>';
-            h += '<div class="form-group"><label class="form-label">Scanner engine</label><div class="form-input" aria-readonly="true">Maldet nativo</div><small class="form-help">Todos os scans usam exclusivamente o mecanismo nativo do Maldet.</small></div>';
+            h += '<div class="form-group"><label class="form-label">Scanner engine</label>';
+            h += '<select class="form-input" id="scan_engine"><option value="native">Maldet nativo (MD5/SHA256/HEX/YARA)</option>';
+            h += '<option value="clamscan"' + (clamavAvailable ? '' : ' disabled') + '>ClamAV (clamscan)' + (clamavAvailable ? '' : ' — não instalado') + '</option></select>';
+            h += '<small class="form-help" id="scan_engine_help">Mecanismo nativo do Maldet: mais rápido, assinaturas MD5/HEX/YARA próprias.</small></div>';
             h += '<div class="form-group"><label class="form-label">Path</label><div class="path-picker-row"><input type="text" class="form-input" id="scan_path" value="/home" required placeholder="/home/user"><button type="button" class="btn btn-ghost" data-action="folder-picker">Browse</button></div><small class="form-help">Choose a folder or enter an absolute directory path manually.</small></div>';
             h += '<div class="form-group" id="scan_days_group" style="display:none;"><label class="form-label">Modified within (days)</label><input type="number" class="form-input" id="scan_days" value="2" min="1" step="1"><small class="form-help">Only files modified in this many days will be scanned.</small></div></div>';
             h += '<div id="tab-adv" style="display:none;"><div class="form-group"><label class="form-label">Config Overrides (-co)</label><input type="text" class="form-input" id="scan_co" placeholder="scan_yara=1,scan_hashtype=sha256"></div>';
@@ -732,6 +739,17 @@
             return h;
         });
     }
+
+    function updateScanEngineHelp() {
+        var engineEl = document.getElementById('scan_engine');
+        var help = document.getElementById('scan_engine_help');
+        if (!engineEl || !help) return;
+        help.textContent = engineEl.value === 'clamscan' ?
+            'ClamAV: usa o antivírus do sistema (clamscan) e o banco de assinaturas do ClamAV.' :
+            'Mecanismo nativo do Maldet: mais rápido, assinaturas MD5/HEX/YARA próprias.';
+        updateScanSummary();
+    }
+
 
     function updateScanTypeFields(type) {
         var daysGroup = document.getElementById('scan_days_group');
@@ -746,14 +764,16 @@
         var path = document.getElementById('scan_path');
         var type = document.getElementById('scan_type');
         var days = document.getElementById('scan_days');
+        var engine = document.getElementById('scan_engine');
         var summary = document.getElementById('scan_summary');
         if (!path || !type || !summary) return;
         var label = type.options[type.selectedIndex].text;
         var value = path.value.trim() || '(enter a path)';
         var detail = type.value === 'recent' ? ' · modified within ' +
             escapeHtml((days && days.value) || '2') + ' day(s)' : '';
+        var engineLabel = engine ? ' · engine: ' + escapeHtml(engine.value === 'clamscan' ? 'ClamAV' : 'Maldet nativo') : '';
         summary.innerHTML = 'Ready to run <strong>' + escapeHtml(label) + '</strong> on <code>' +
-            escapeHtml(value) + '</code>' + detail + '. <span>No scan has started yet.</span>';
+            escapeHtml(value) + '</code>' + detail + engineLabel + '. <span>No scan has started yet.</span>';
     }
 
     var _folderPickerTargetId = 'scan_path';
@@ -841,6 +861,7 @@
         var scanTypeEl = document.getElementById('scan_type');
         var scanPathEl = document.getElementById('scan_path');
         var scanDaysEl = document.getElementById('scan_days');
+        var scanEngineEl = document.getElementById('scan_engine');
         var scanCoEl = document.getElementById('scan_co');
         var scanIncEl = document.getElementById('scan_inc');
         var scanExcEl = document.getElementById('scan_exc');
@@ -866,9 +887,8 @@
             type: type,
             path: path,
             days: (scanDaysEl && scanDaysEl.value) || '2',
-            config_overrides: ((scanCoEl && scanCoEl.value) || '') +
-                ((scanCoEl && scanCoEl.value) ? ',' : '') +
-                'scan_clamscan=0',
+            engine: (scanEngineEl && scanEngineEl.value) || 'native',
+            config_overrides: (scanCoEl && scanCoEl.value) || '',
             include_regex: (scanIncEl && scanIncEl.value) || '',
             exclude_regex: (scanExcEl && scanExcEl.value) || '',
             background: !!(scanBgEl && scanBgEl.checked)

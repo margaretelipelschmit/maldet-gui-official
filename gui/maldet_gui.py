@@ -1478,14 +1478,23 @@ class MaldetAPI:
                     raise ValueError
             except (TypeError, ValueError):
                 return 400, {"error": "Recent scans require a positive number of days"}
+        engine = str(data.get("engine", "native")).strip().lower()
+        if engine not in ("native", "clamscan"):
+            return 400, {"error": "Unsupported scan engine: " + engine}
+        if engine == "clamscan" and not get_clamav_status()["available"]:
+            return 400, {"error": "ClamAV (clamscan) is not installed on this host"}
         config_overrides = data.get("config_overrides", "")
-        # GUI scans always use Maldet's native engine, regardless of any
-        # stale or forged ClamAV override supplied by a client.
+        # Strip any client-supplied scan_clamscan override — the engine is
+        # always driven by the validated `engine` selection above, never by
+        # a raw config string, so a stale/forged value can't smuggle in the
+        # wrong engine.
         override_parts = [
             part for part in str(config_overrides).split(",")
             if part.strip().split("=", 1)[0].strip() != "scan_clamscan"
         ]
-        config_overrides = ",".join(override_parts + ["scan_clamscan=0"])
+        config_overrides = ",".join(
+            override_parts + ["scan_clamscan=" + ("1" if engine == "clamscan" else "0")]
+        )
         include_regex = data.get("include_regex", "")
         exclude_regex = data.get("exclude_regex", "")
         user = data.get("user", "")
