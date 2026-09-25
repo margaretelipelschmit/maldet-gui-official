@@ -65,6 +65,10 @@ _build_scan_filters() {
 }
 
 _scan_cleanup() {
+	# Release this scan's hold on the shared clamd-daemon CPU throttle, if any
+	# was applied by _clamd_apply_throttle() (no-op if never applied).
+	_clamd_restore_throttle "$scanid"
+
 	# In stop mode, preserve scan_session for checkpoint resume via --continue.
 	# All other runtime temp files are cleaned normally.
 	if [ "${_scan_stop_mode:-0}" != "1" ]; then
@@ -979,6 +983,10 @@ scan() {
 	local _gensigs_elapsed=$(( SECONDS - _gensigs_start ))
 	if [ "$scan_clamscan" == "1" ]; then
 		clamselector
+		# Throttle the shared clamd daemon itself (not just the clamdscan
+		# client) so scan_cpunice/scan_cpulimit actually limit CPU use when
+		# ClamAV's daemon engine is in play — restored in _scan_cleanup.
+		_clamd_apply_throttle "$scanid"
 	fi
 
 	# Re-count from runtime files (may differ from preview due to custom sig merging)

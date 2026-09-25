@@ -39,6 +39,7 @@ c00e1333b50069a1c78a9923d981a5ee365d4ad04d26a54c9a94fdaaecec666b  ./docs/images/
 9c97273ccfb160fa7c1984dbec8829ecd0ba54e310e7f76d0fc6f2dd55aa8462  ./docs/images/gui-en/14.png
 568d428f937684071827b077d8aff32bc7819fb68a9b95451cc2dc1450c38e42  ./docs/images/gui-en/15.png
 b22a3d87b0cda1cd73f52911261b9901f57255b9c2df1953fe3ca64cbb9b5b30  ./files/clean/base64.inject.unclassed
+945f88441578b0ed0ce7d444f6c7f400ddd4f8f39111651369008870e2fe18bf  ./files/clean/gzbase64.inject.unclassed
 8d7359fda7ad4675eeb8dcf4289d5be734f88f8e9622803efa9da4a0874906da  ./files/clean/js.inject.fakejquery02
 08dd814467bfd1ed43bede66b25d9f43ac8602d0855390435a99d9335b531efb  ./files/clean/js.inject.VisitorTracker
 19ebea98c251a3a2f28e6cd233fd129d899019a0b26fe1e12376f8455a4663df  ./files/clean/php.brute.bf1lic
@@ -87,16 +88,16 @@ c52ba10b13b42df31cf9820164a4c9b87308270b10c53a91e4071b38bdcd9e3b  ./files/intern
 39880498363b07de02d2f1d7c9dfff79c197e5e02163ea029eb7351d0ee1f956  ./files/internals/importconf
 796ba7f8a214ba39a5e007f2554f431878131a4c7733aefac2a938ca85380f36  ./files/internals/internals.conf
 8c4c1cc669bf926979c7d43e8454114b8cf7e50c8ed34ef6933b21d64667c133  ./files/internals/lmd_alert.sh
-86d6d90b9e38f9eb10445ea4def0423c5d55df4fd26d74bfe9ca2633cac65a5e  ./files/internals/lmd_clamav.sh
+85f7fece47de8053ae9ffc86b36cce11480ffb4f5b77ec73b1fd50fb3e1684e8  ./files/internals/lmd_clamav.sh
 20742fd8b34524bda45800ec77ac91bfa7bb468881011e64489587352ebcb76e  ./files/internals/lmd_config.sh
 c14ddbadbc2d51c08025562cc551a1f04fb1698482d6e2e81f212b3718fd581e  ./files/internals/lmd_engine.sh
 1ab5a28c6ded27d85c92a100efbc994e2f29a5c780670ef6c2100685ad013b0b  ./files/internals/lmd_hook.sh
 16461994b01f94a0fdea12739936ae20f785cf8ea5b59f74b729cd51175c11e9  ./files/internals/lmd_init.sh
 f85874bfdf8e720e549eb86b3a8b1e0edbddde5cc9672499d3a0e88ec3152eaf  ./files/internals/lmd.lib.sh
-61af506706ca2f341a34560dba07a22d52e89ee30b0cf8414ce0fbdee8932277  ./files/internals/lmd_lifecycle.sh
+1e05f540ae2b4d76d41552ed6447bacfff9439c36000c4b52670b2c695c4d73f  ./files/internals/lmd_lifecycle.sh
 d86b8b5ddaefde49904988002fbd38a7088b554f5749a720410bf230d3d79d88  ./files/internals/lmd_monitor.sh
 05b9351a5cd060fd9f514765b98674a90c973d112b315e16ffba2353b18a1036  ./files/internals/lmd_quarantine.sh
-ec4e85c8f6e1c8ee2019638b2bfc37f63ac5d7ae7ca2604a692aef3f08cb2339  ./files/internals/lmd_scan.sh
+33e6f9face136b7c3834a52f6a0e779b06e28773ed534c95f7d32fb159d1a7f8  ./files/internals/lmd_scan.sh
 b09ee6000cbd4937f260507dc688e51db50d5537e37ca82c9203c1e67e40d92c  ./files/internals/lmd_session.sh
 259242c15237d4ca6d78f7d00a02f95a706ffbf952af19634b97bc3f4ce00741  ./files/internals/lmd_sigs.sh
 15b1ac1c25a2979fe40b7602db82f23a705d6e09d8c772ace57d32e663ae0700  ./files/internals/lmd_update.sh

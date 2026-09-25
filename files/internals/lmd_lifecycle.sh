@@ -741,6 +741,13 @@ _lifecycle_kill() {
 		"$tmpdir/.pause.$_scanid" \
 		2>/dev/null  # safe: files may not exist
 
+	# Release any clamd-daemon CPU throttle this scan was holding. Belt-and-
+	# suspenders alongside the scan's own _scan_cleanup trap: a background
+	# scan's process group can be TERM/KILL'd as a unit above, so the killed
+	# scan's own trap is not guaranteed to run to completion. Idempotent —
+	# a no-op if the scan already released it (or never held it).
+	_clamd_restore_throttle "$_scanid"
+
 	_lifecycle_update_meta "$_scanid" "state" "killed"
 
 	eout "{lifecycle} scan $_scanid killed" 1

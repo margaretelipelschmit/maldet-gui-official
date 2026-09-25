@@ -261,6 +261,94 @@ clamselector() {
 	fi
 }
 
+# _clamd_apply_throttle scanid — deprioritize the shared clamd DAEMON for the
+# duration of maldet-triggered scans. scan_cpunice/scan_ionice/scan_cpulimit
+# only wrap the clamdscan CLIENT process maldet spawns (via $nice_command);
+# the actual file-scanning CPU work happens inside the pre-existing clamd
+# daemon over its socket, which is otherwise completely unthrottled and can
+# peg CPU cores regardless of those settings.
+#
+# Tracked via one marker file per holding scanid (not a bare counter) so that
+# releasing the same scanid's hold twice — e.g. once from a killed scan's own
+# _scan_cleanup trap and once from _lifecycle_kill's own restore call, since a
+# background scan's process-group TERM/KILL race means the trap is not
+# guaranteed to run to completion — is a no-op instead of corrupting the
+# refcount for other, still-running, concurrent scans.
+_clamd_apply_throttle() {
+	local _scanid="$1"
+	[ -n "$_scanid" ] || return 0
+	[ "$clamd" ] || return 0
+	[ "$scan_clamd_remote" == "1" ] && return 0  # remote clamd — nothing local to throttle
+	command -v flock >/dev/null 2>&1 || return 0  # best-effort only
+	command -v renice >/dev/null 2>&1 || return 0
+
+	local _lockfile="$tmpdir/.clamd_throttle.lock"
+	local _holdersdir="$tmpdir/.clamd_throttle.holders"
+	local _nicefile="$tmpdir/.clamd_throttle.orig_nice"
+	local _cpulimitpidfile="$tmpdir/.clamd_throttle.cpulimit.pid"
+	local _clamd_pid
+	_clamd_pid=$(pgrep -x clamd 2>/dev/null | head -n1)
+	[ -n "$_clamd_pid" ] || return 0
+
+	(
+		flock -x -w 5 201 || exit 0
+		command mkdir -p "$_holdersdir" 2>/dev/null
+		if [ -z "$(command ls -A "$_holdersdir" 2>/dev/null)" ]; then
+			# First holder — capture original priority and apply the throttle
+			local _orig_nice
+			_orig_nice=$(ps -o ni= -p "$_clamd_pid" 2>/dev/null | tr -d ' ')
+			[ -n "$_orig_nice" ] || _orig_nice=0
+			echo "$_orig_nice" > "$_nicefile"
+			if [ "$scan_cpunice" ] && [ "$scan_cpunice" -gt "$_orig_nice" ] 2>/dev/null; then
+				renice -n "$scan_cpunice" -p "$_clamd_pid" >/dev/null 2>&1
+			fi
+			if [ -n "$cpulimit" ] && [ -f "$cpulimit" ] && [ "$scan_cpulimit" -gt 0 ] 2>/dev/null; then
+				"$cpulimit" -p "$_clamd_pid" -l "$scan_cpulimit" -z -b >/dev/null 2>&1 &
+				disown 2>/dev/null
+				echo "$!" > "$_cpulimitpidfile"
+			fi
+		fi
+		: > "$_holdersdir/$_scanid"
+	) 201>"$_lockfile"
+}
+
+# _clamd_restore_throttle scanid — release this scan's hold on the shared
+# clamd throttle. Only when no holder markers remain does clamd's original
+# nice level get restored and the cpulimit watcher stopped. Safe to call more
+# than once for the same scanid (idempotent) and safe to call for a scanid
+# that never held the throttle (no-op).
+_clamd_restore_throttle() {
+	local _scanid="$1"
+	[ -n "$_scanid" ] || return 0
+	command -v flock >/dev/null 2>&1 || return 0
+	local _lockfile="$tmpdir/.clamd_throttle.lock"
+	local _holdersdir="$tmpdir/.clamd_throttle.holders"
+	local _nicefile="$tmpdir/.clamd_throttle.orig_nice"
+	local _cpulimitpidfile="$tmpdir/.clamd_throttle.cpulimit.pid"
+	[ -d "$_holdersdir" ] || return 0
+
+	(
+		flock -x -w 5 201 || exit 0
+		command rm -f "$_holdersdir/$_scanid" 2>/dev/null
+		if [ -z "$(command ls -A "$_holdersdir" 2>/dev/null)" ]; then
+			if [ -f "$_cpulimitpidfile" ]; then
+				local _cpid
+				_cpid=$(cat "$_cpulimitpidfile" 2>/dev/null)
+				[ -n "$_cpid" ] && kill "$_cpid" 2>/dev/null
+				command rm -f "$_cpulimitpidfile"
+			fi
+			local _orig_nice _clamd_pid
+			_orig_nice=$(cat "$_nicefile" 2>/dev/null)
+			_clamd_pid=$(pgrep -x clamd 2>/dev/null | head -n1)
+			if [ -n "$_clamd_pid" ] && [ -n "$_orig_nice" ] && command -v renice >/dev/null 2>&1; then
+				renice -n "$_orig_nice" -p "$_clamd_pid" >/dev/null 2>&1
+			fi
+			command rm -f "$_nicefile" 2>/dev/null
+			command rmdir "$_holdersdir" 2>/dev/null  # safe: no-op if concurrently repopulated
+		fi
+	) 201>"$_lockfile"
+}
+
 _clamd_retry_scan() {
 	local _filelist="$1" _results="${2:-$clamscan_results}" _pid_file="${3:-}"
 	if [ "$scan_clamd_remote" == "1" ] && [ -f "$remote_clamd_config" ]; then
