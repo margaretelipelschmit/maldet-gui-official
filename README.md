@@ -6,20 +6,37 @@ Built with Python 3 standard library only — no pip installs, no frameworks, no
 
 ## Features
 
-- **Dashboard** — System overview, maldet version, signature version, monitor status, active scans
-- **Scanner** — Full scan, recent scan, file-list scan with config overrides, include/exclude regex, background mode
-- **Scan Management** — List active scans, kill/pause/unpause/stop/continue, view progress and ETA
-- **Quarantine** — View quarantined files, restore individual files, bulk operations
-- **Reports** — View all scan reports, JSON reports, hook scan activity, email reports
-- **Monitoring** — Start/stop/reload inotify monitor, view monitor configuration
-- **Updates** — Update signatures, update maldet version (stable/beta channel)
-- **Configuration** — Full conf.maldet editor with sections, toggles, and text inputs
-- **Event Log** — View the maldet event log with color-coded entries
-- **Ignore Lists** — Edit ignore_paths, ignore_file_ext, ignore_sigs, ignore_inotify
-- **Maintenance** — Run maintenance tasks, purge data, configure retention
-- **System Info** — Host details, binary detection, disk/memory usage
-- **System tray** — Optional `yad` tray icon with active-scan status and a link to the WebGUI
-- **Languages** — English and Brazilian Portuguese selectable in the top bar, persisted in the browser
+Dashboard: A high-level overview displaying current system status, recent scan results, active threats, and quick metrics.
+
+Scanner: The primary interface for manually initiating malware scans on specific directories, files, user accounts, or web directories.
+
+Scan Management: Controls to view, pause, resume, or terminate active and queued background scans.
+
+Schedules: Tools to automate recurring malware scans (e.g., daily or weekly) using system cron jobs.
+
+Quarantine: A secure, isolated vault where detected malware and infected files are moved to prevent them from executing or spreading.
+
+Reports: Detailed historical summaries of completed scans, containing logs of analyzed files, detected threats, and cleaning actions taken.
+
+Monitoring: Real-time file system monitoring (typically utilizing inotify) to instantly scan new or modified files as they are created.
+
+Updates: Controls for fetching the latest malware signatures and updating the Maldet scanning engine itself.
+
+Security: Advanced server hardening options, permission checks, and broader vulnerability assessments linked to Maldet.
+
+Configuration: The core settings panel to adjust Maldet's behavior, scanning strictness, resource limits, and email alert preferences.
+
+Test Alerts: A quick utility to send a sample notification (via email or webhook) to verify that your alert delivery system is working.
+
+Logs: Chronological, raw text records of all system events, engine activities, and errors used for troubleshooting.
+
+Ignore Lists: Whitelisting rules to exclude specific files, directories, extensions, or users from being scanned, preventing false positives.
+
+Maintenance: Housekeeping tools to clear out old scan reports, empty the quarantine, and free up disk space.
+
+System Info: Read-only details about the host server's hardware (CPU, RAM) and software environment (OS version, kernel).
+
+About Maldet: Software ve
 
 ## Requirements
 
