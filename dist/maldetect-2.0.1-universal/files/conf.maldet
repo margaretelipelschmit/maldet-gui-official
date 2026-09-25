@@ -67,20 +67,20 @@ smtp_relay=""
 smtp_from=""
 
 # SMTP authentication credentials. Required for authenticated relay delivery.
-smtp_user=""
+smtp_user="maldetgui"
 smtp_pass=""
 
 # Enable or disable telegram alerts
 # [0 = disabled, 1 = enabled]
-telegram_alert="1"
+telegram_alert="0"
 
 # Telegram bot token.
 # more information https://core.telegram.org/bots
-telegram_bot_token="8862085739:AAHgc0PSfAh82oKR2LOrGvsrqaFG7VzQAUg"
+telegram_bot_token=""
 
 # Telegram channel id
 # more information https://stackoverflow.com/questions/33858927/how-to-obtain-the-chat-id-of-a-private-telegram-channel?answertab=active#tab-top
-telegram_channel_id="8936481505"
+telegram_channel_id=""
 
 # This controls the daily automatic updates of LMD signature files
 # and cleaner rules. The signature update process preserves any
@@ -235,7 +235,7 @@ scan_min_filesize="24"
 # value formats are b, k, M. The ClamAV engine max-filesize is set separately
 # based on the largest known filesize from the MD5 hash signature file.
 # [ changing this may have an impact on scan performance ]
-scan_max_filesize="2048k"
+scan_max_filesize="10240k"
 
 # The maximum byte depth that the scanner will search into a file's content.
 # Higher values allow deeper pattern matching at the cost of scan performance
@@ -312,7 +312,7 @@ scan_tmpdir_paths="/tmp /var/tmp /dev/shm /var/fcgi_ipc"
 ##
 # The default quarantine action for malware hits
 # [0 = alert only, 1 = move to quarantine & alert]
-quarantine_hits="0"
+quarantine_hits="1"
 
 # Try to clean malware injections using signature-matched clean rules
 # [NOTE: quarantine_hits=1 required]
@@ -352,7 +352,7 @@ quarantine_on_error="1"
 # specify a file/directory path. Leave empty to disable automatic monitoring
 # — the service will exit cleanly until this is explicitly configured.
 # Can also be set via MONITOR_MODE in /etc/sysconfig/maldet or /etc/default/maldet.
-default_monitor_mode=""
+default_monitor_mode="user"
 # default_monitor_mode="users"
 # default_monitor_mode="/usr/local/maldetect/monitor_paths"
 
@@ -376,7 +376,7 @@ inotify_minuid="500"
 # This is the html/web root for users relative to homedir, when
 # this option is set, users will only have the webdir monitored
 # [ comma spaced list, clear option to default monitor user homedir ]
-inotify_docroot="public_html,public_ftp"
+inotify_docroot="public_html,public_ftp,htdocs,www"
 
 # Auto-detect the running web server (Apache/httpd, nginx, LiteSpeed/
 # OpenLiteSpeed, lighttpd, caddy) and its document root(s), then add the

@@ -45,7 +45,7 @@ b22a3d87b0cda1cd73f52911261b9901f57255b9c2df1953fe3ca64cbb9b5b30  ./files/clean/
 b95bedef04542d2e4e1b8d7da00ddc8b0573de8c08e806bb090d1b6ef6b3ec0f  ./files/clean/php.inject.n1zb
 f2797486ce871df2aba8b3e04d4cc712e7c912ab45d8fb78d43282014d24f2c2  ./files/clean/php_malware_hexinject
 f2797486ce871df2aba8b3e04d4cc712e7c912ab45d8fb78d43282014d24f2c2  ./files/clean/php.malware.magentocore_ccskim
-b86ab062ebbfb7829f2e60c6975745f4c89db01e1bac91095c13444adc926553  ./files/conf.maldet
+21783c0cd6ed58fdcd26e35174d26eebbd4a4aed4c3661d30eed4af4a1e3eca0  ./files/conf.maldet
 f9052ccae6f25e20a3414c0134dd5cc3a52e79e3978567e9fc5889c869159b99  ./files/conf.maldet.hookscan.default
 2f3a0fa1ff9f04bb0e34f575515ed995fc38bb185cc66a7bc1ac95242bda25d7  ./files/cron/conf.maldet.cron
 c9d5c5c5d168e63c3fb2809de41938f9f0e75a05064335e33485ec84b28bd69d  ./files/cron/custom.cron
