@@ -942,7 +942,7 @@
         if (active.length === 0) {
             h += '<p style="padding:12px;color:var(--text-muted);">No active scans.</p>';
         } else {
-            h += '<table><thead><tr><th>Scan ID</th><th>Directory</th><th>State</th><th>Engine</th><th>PID</th><th>Files scanned</th><th>Hits</th><th>Elapsed</th><th>Actions</th></tr></thead><tbody>';
+            h += '<table><thead><tr><th>Scan ID</th><th>Directory</th><th>State</th><th>Engine</th><th>PID</th><th>Files scanned</th><th>Total files</th><th>Hits</th><th>Elapsed</th><th>Actions</th></tr></thead><tbody>';
             for (var i = 0; i < active.length; i++) {
                 var s = active[i];
                 var progress = s.progress || {};
@@ -963,7 +963,7 @@
                 var hitLabel = hitCount > 0 ?
                     '<span class="badge bg-danger">' + hitCount + ' detected</span>' :
                     '<span class="badge bg-success">No hits</span>';
-                h += '<td>' + (s.pid || '-') + '</td><td>' + progressBar + '<div class="scan-files-count">' + filesText + '</div></td><td>' + hitLabel + '</td><td>' + fmtDuration(s.elapsed) + '</td>';
+                h += '<td>' + (s.pid || '-') + '</td><td>' + progressBar + '<div class="scan-files-count">' + filesText + '</div></td><td>' + (total > 0 ? total : '-') + '</td><td>' + hitLabel + '</td><td>' + fmtDuration(s.elapsed) + '</td>';
                 h += '<td><button class="btn btn-ghost btn-sm" data-action="scan-details" data-id="' + escapeHtml(s.scan_id || '') + '">Details</button> ';
                 h += '<button class="btn btn-danger btn-sm" data-action="scan-stop" data-id="' + escapeHtml(s.scan_id || '') + '">Stop</button></td></tr>';
             }
