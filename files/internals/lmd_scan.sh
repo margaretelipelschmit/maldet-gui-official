@@ -386,6 +386,10 @@ _start_elapsed_timer() {
 	# see parent's progress vars, so these are liveness checks, not progress.
 	_timer_pid=""
 	local _stage="$1" _file_count="$2" _start_ts _base_poll _paused_accum=0
+	# Owning scan process: the ticker exits once it is gone, so a scan killed
+	# without running _stop_elapsed_timer cannot leave an orphaned watchdog
+	# loop (reparented to init) logging "running Nh" forever.
+	local _timer_owner="${BASHPID:-$$}"
 	_start_ts=$SECONDS
 	if [ "$set_background" == "1" ]; then
 		_base_poll="${_bg_progress_interval:-60}"
@@ -396,6 +400,7 @@ _start_elapsed_timer() {
 			_elapsed=$(( SECONDS - _start_ts - _paused_accum ))
 			_sleep_dur=$(_bg_backoff_interval "$_elapsed" "$_base_poll")
 			sleep "$_sleep_dur"
+			kill -0 "$_timer_owner" 2>/dev/null || exit 0
 			# Suppress while scan is paused
 			if [ -n "${scanid:-}" ] && [ -f "$tmpdir/.pause.$scanid" ]; then
 				_paused_accum=$((_paused_accum + _sleep_dur))
@@ -417,6 +422,7 @@ _start_elapsed_timer() {
 	else
 		while true; do
 			sleep 2
+			kill -0 "$_timer_owner" 2>/dev/null || exit 0
 			# Suppress console output while scan is paused
 			if [ -n "${scanid:-}" ] && [ -f "$tmpdir/.pause.$scanid" ]; then
 				_paused_accum=$((_paused_accum + 2))

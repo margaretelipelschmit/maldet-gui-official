@@ -328,3 +328,30 @@ EOFSCRIPT
     [ -f "$call_log" ]
     rm -rf "$test_tmpdir"
 }
+
+@test "_start_elapsed_timer background ticker exits when its owning scan dies" {
+    local work
+    work=$(mktemp -d)
+    cat > "$work/owner.sh" <<OWNER
+source "$LMD_INSTALL/internals/internals.conf"
+source "$LMD_INSTALL/conf.maldet"
+source "$LMD_INSTALL/internals/lmd.lib.sh"
+eout() { :; }
+_bg_backoff_interval() { echo 1; }
+set_background=1
+_bg_progress_interval=1
+_start_elapsed_timer clamav 10
+echo "\$_timer_pid" > "$work/tpid"
+sleep 1.5
+OWNER
+    # Owner exits without calling _stop_elapsed_timer (simulates a killed scan).
+    bash "$work/owner.sh"
+    local tpid
+    tpid=$(cat "$work/tpid")
+    [ -n "$tpid" ]
+    sleep 3
+    run bash -c "kill -0 $tpid 2>/dev/null && echo alive || echo gone"
+    [ "$output" = "gone" ] || kill "$tpid" 2>/dev/null
+    rm -rf "$work"
+    assert_output "gone"
+}
