@@ -191,11 +191,11 @@ clamselector() {
 		elif [ "$isclamd" ] && [ "$isclamd_root" ]; then
 			clamd=1
 			clambin="clamdscan"
-			clamopts="$clamdscan_extraopts"
+			clamopts="--multiscan $clamdscan_extraopts"
 		elif [ "$isclamd" ] && [ ! "$isclamd_root" ]; then
 			clamd=1
 			clambin="clamdscan"
-			clamopts="--fdpass $clamdscan_extraopts"
+			clamopts="--fdpass --multiscan $clamdscan_extraopts"
 		else
 			_clamscan_fallback
 			if [ "$monitor_mode" ]; then
@@ -293,8 +293,9 @@ _clamd_prune_dead_holders() {
 # (percentage of one core, independent from scan_cpulimit which governs the
 # clamdscan/clamscan/find/yara CLIENT processes) is what actually caps clamd's
 # real usage, via periodic SIGSTOP/SIGCONT cycling done by the cpulimit binary
-# — defaults to 50 so this is capped out of the box even if unset in an older
-# conf.maldet, but an explicit scan_clamd_cpulimit="0" disables the cap.
+# — defaults to "auto" (half of all cores, nproc*50) so this is capped out of
+# the box even if unset in an older conf.maldet, but an explicit
+# scan_clamd_cpulimit="0" disables the cap.
 #
 # Tracked via one marker file per holding scanid (not a bare counter) so that
 # releasing the same scanid's hold twice — e.g. once from a killed scan's own
@@ -317,7 +318,14 @@ _clamd_apply_throttle() {
 	local _clamd_pid
 	_clamd_pid=$(pgrep -x clamd 2>/dev/null | head -n1)
 	[ -n "$_clamd_pid" ] || return 0
-	local _clamd_cpulimit="${scan_clamd_cpulimit:-50}"
+	local _clamd_cpulimit="${scan_clamd_cpulimit:-auto}"
+	if [ "$_clamd_cpulimit" = "auto" ]; then
+		# Half of the host's total CPU capacity (cpulimit % is per core).
+		local _ncpu
+		_ncpu=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null)
+		[ "$_ncpu" -ge 1 ] 2>/dev/null || _ncpu=1
+		_clamd_cpulimit=$(( _ncpu * 50 ))
+	fi
 
 	(
 		flock -x -w 15 201 || exit 0

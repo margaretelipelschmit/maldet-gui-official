@@ -233,7 +233,7 @@ _lmd_compute_summary() {
 		total++
 		type = $4
 		if (type != "") types[type]++
-		if ($3 != "" && $3 != "-") quarantined++
+		if ($3 != "" && $3 != "-") { qhits++; if (!qseen[$3]++) quarantined++ }
 	}
 	END {
 		# Build type breakdown
@@ -245,10 +245,12 @@ _lmd_compute_summary() {
 			by_type_html = by_type_html t "(" types[t] ")"
 		}
 		# Quarantine status
-		if (quarantined == total && total > 0) {
+		# quarantined = distinct files; qhits = hit lines (one file may match
+		# several signatures), so status compares detections to detections.
+		if (qhits == total && total > 0) {
 			qstatus = "All threats quarantined"
-		} else if (quarantined > 0) {
-			qstatus = quarantined " of " total " quarantined"
+		} else if (qhits > 0) {
+			qstatus = qhits " of " total " quarantined"
 		} else {
 			qstatus = "None quarantined"
 		}
@@ -509,7 +511,7 @@ _lmd_render_json() {
 		ht[hit_n]=$4; htl[hit_n]=$5; hash[hit_n]=$6
 		sz[hit_n]=$7; own[hit_n]=$8; grp[hit_n]=$9
 		mode[hit_n]=$10; mtime[hit_n]=$11
-		if ($3 != "-" && $3 != "") quarantined++
+		if ($3 != "-" && $3 != "") { qhits++; if (!qseen[$3]++) quarantined++ }
 		types[$4]++
 	}
 	END {
@@ -570,8 +572,8 @@ _lmd_render_json() {
 		printf "        \"total_hits\": %d,\n", hit_n+0
 		printf "        \"total_quarantined\": %d,\n", quarantined+0
 		printf "        \"total_cleaned\": %s,\n", jnum_or_null(total_cleaned)
-		if (quarantined == hit_n && hit_n > 0) qstat = "All threats quarantined"
-		else if (quarantined > 0) qstat = quarantined " of " hit_n " quarantined"
+		if (qhits == hit_n && hit_n > 0) qstat = "All threats quarantined"
+		else if (qhits > 0) qstat = qhits " of " hit_n " quarantined"
 		else qstat = "None quarantined"
 		printf "        \"quarantine_status\": \"%s\",\n", json_esc(qstat)
 		printf "        \"by_type\": {"
@@ -658,7 +660,7 @@ _lmd_render_json_legacy() {
 		hit_n++
 		sig[hit_n]=$1; fp[hit_n]=$2; qp[hit_n]=$3
 		ht[hit_n]=$4; htl[hit_n]=$6
-		if ($3 != "-" && $3 != "") quarantined++
+		if ($3 != "-" && $3 != "") { qhits++; if (!qseen[$3]++) quarantined++ }
 		types[$4]++
 	}
 	END {
@@ -719,8 +721,8 @@ _lmd_render_json_legacy() {
 		printf "        \"total_hits\": %d,\n", hit_n+0
 		printf "        \"total_quarantined\": %d,\n", quarantined+0
 		printf "        \"total_cleaned\": %s,\n", jnum_or_null(total_cleaned)
-		if (quarantined == hit_n && hit_n > 0) qstat = "All threats quarantined"
-		else if (quarantined > 0) qstat = quarantined " of " hit_n " quarantined"
+		if (qhits == hit_n && hit_n > 0) qstat = "All threats quarantined"
+		else if (qhits > 0) qstat = qhits " of " hit_n " quarantined"
 		else qstat = "None quarantined"
 		printf "        \"quarantine_status\": \"%s\",\n", json_esc(qstat)
 		printf "        \"by_type\": {"

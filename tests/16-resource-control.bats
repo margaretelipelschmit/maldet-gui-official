@@ -136,9 +136,9 @@ _spawn_mock_clamd() {
     rm -rf "$mockbin" "$tmpdir"
 }
 
-@test "scan_clamd_cpulimit defaults to 50 and is independent from scan_cpulimit" {
+@test "scan_clamd_cpulimit defaults to auto and is independent from scan_cpulimit" {
     source "$LMD_INSTALL/conf.maldet"
-    [ "${scan_clamd_cpulimit:-50}" = "50" ]
+    [ "${scan_clamd_cpulimit:-auto}" = "auto" ]
     # scan_cpulimit (client processes) stays disabled by default — the new
     # daemon-only setting must not change that existing semantic.
     [ "$scan_cpulimit" = "0" ]
@@ -210,6 +210,33 @@ _spawn_mock_clamd() {
     assert_output "dead"
 
     _clamd_restore_throttle "unit-test-scan-cpulimit-pid"
+    kill "$mock_pid" 2>/dev/null
+    rm -rf "$mockbin" "$tmpdir"
+}
+
+@test "_clamd_apply_throttle auto cpulimit caps clamd at half of all cores" {
+    command -v renice >/dev/null 2>&1 || skip "renice not available"
+    command -v cpulimit >/dev/null 2>&1 || skip "cpulimit not available"
+    if pgrep -x clamd >/dev/null 2>&1; then
+        skip "a real clamd is already running on this host — would collide with mock"
+    fi
+    _source_lmd_stack_resource
+
+    read -r mockbin mock_pid < <(_spawn_mock_clamd)
+    tmpdir=$(mktemp -d)
+    clamd=1
+    scan_clamd_remote=""
+    scan_cpunice=19
+    scan_cpulimit=0
+    scan_clamd_cpulimit=auto
+    cpulimit=$(command -v cpulimit)
+    local expected=$(( $(nproc) * 50 ))
+
+    _clamd_apply_throttle "unit-test-scan-cpulimit-auto"
+    run pgrep -f -- "cpulimit -p $mock_pid -l $expected -z"
+    assert_success
+
+    _clamd_restore_throttle "unit-test-scan-cpulimit-auto"
     kill "$mock_pid" 2>/dev/null
     rm -rf "$mockbin" "$tmpdir"
 }

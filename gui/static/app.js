@@ -250,10 +250,26 @@
             'Signature Set': 'Conjunto de assinaturas', 'Monitor': 'Monitor',
             'ONLINE': 'ATIVO', 'OFFLINE': 'INATIVO', 'Maldet native (live file progress)': 'Maldet nativo (progresso em tempo real)',
             'ClamAV/clamdscan (faster, limited progress)': 'ClamAV/clamdscan (mais rápido, progresso limitado)',
-            'ClamAV updated': 'ClamAV atualizado',
-            'ClamAV already current': 'ClamAV já está atualizado',
+            'ClamAV updated': 'Base de dados do ClamAV atualizada',
+            'ClamAV already current': 'A base de dados do ClamAV já está atualizada',
             'ClamAV update failed: ': 'Falha ao atualizar o ClamAV: ',
-            'Update complete: already current': 'Atualização completa: já atualizado',
+            'Update complete: already current': 'Atualização concluída: o Maldet já está na versão mais recente',
+            'Update complete: version changed': 'Atualização concluída: nova versão do Maldet instalada',
+            'Update failed: ': 'Falha na atualização: ',
+            'Signatures updated': 'Assinaturas atualizadas com sucesso',
+            'Signatures already current': 'As assinaturas já estão atualizadas',
+            'Signature update failed: ': 'Falha ao atualizar as assinaturas: ',
+            'see the update details below': 'veja os detalhes da atualização abaixo',
+            'LMD Version': 'Versão do LMD', 'Signatures': 'Assinaturas',
+            'Installer location': 'Local do instalador',
+            'Not available in the installed runtime': 'Não disponível na instalação atual',
+            'update:unknown': 'desconhecido', 'update:missing': 'ausente', 'update:available': 'disponível',
+            'update:completed': 'concluída', 'update:failed': 'falhou', 'update:yes': 'sim', 'update:no': 'não',
+            'update:Update': 'Atualização',
+            'update:signature update': 'Atualização de assinaturas',
+            'update:version update': 'Atualização de versão',
+            'update:beta version update': 'Atualização para a versão beta',
+            'update:clamav database update': 'Atualização da base de dados do ClamAV',
             'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Scan concluído — ameaças encontradas!',
             'Scan complete - no malware': 'Scan concluído — nenhum malware encontrado',
             'Scan started in background': 'Scan iniciado em segundo plano', 'Monitor started': 'Monitor iniciado',
@@ -444,6 +460,70 @@
         _statusTimer = setInterval(updateStatusIndicator, 5000);
     }
 
+    // ----- Page auto-refresh -----
+    // Silently re-renders the current page so it always shows fresh data.
+    // Config is excluded (editing form) and Scan Management has its own
+    // faster live refresh. Refresh pauses while the user is interacting
+    // (focused field, edited input, open modal, started an action) so no
+    // typed data or in-progress feedback is ever wiped.
+    var PAGE_AUTO_REFRESH_MS = 10000;
+    var PAGE_AUTO_REFRESH_EXCLUDE = { config: true, 'scan-management': true };
+    var _pageRefreshTimer = null;
+    var _pageRefreshInFlight = false;
+    var _pageDirty = false;
+    var _pageRenderSeq = 0;
+    var _lastPageHtml = '';
+
+    function stopPageAutoRefresh() {
+        if (_pageRefreshTimer) { clearInterval(_pageRefreshTimer); _pageRefreshTimer = null; }
+    }
+
+    function startPageAutoRefresh(name) {
+        stopPageAutoRefresh();
+        if (PAGE_AUTO_REFRESH_EXCLUDE[name]) return;
+        _pageRefreshTimer = setInterval(pageAutoRefreshTick, PAGE_AUTO_REFRESH_MS);
+    }
+
+    function pageIsBusy(content) {
+        if (_pageDirty || document.hidden) return true;
+        if (document.querySelector('.modal-backdrop')) return true;
+        var ae = document.activeElement;
+        return !!(ae && content.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName));
+    }
+
+    function pageAutoRefreshTick() {
+        var name = Router.currentPage;
+        var content = document.getElementById('content');
+        if (!content || PAGE_AUTO_REFRESH_EXCLUDE[name] || !Router.routes[name]) return;
+        if (_pageRefreshInFlight || pageIsBusy(content)) return;
+        var seq = _pageRenderSeq;
+        _pageRefreshInFlight = true;
+        Promise.resolve(Router.routes[name]()).then(function(html) {
+            if (seq !== _pageRenderSeq || Router.currentPage !== name) return;
+            if (html === _lastPageHtml || pageIsBusy(content)) return;
+            var scroll = content.scrollTop;
+            content.innerHTML = html;
+            translateDom(content);
+            content.scrollTop = scroll;
+            _lastPageHtml = html;
+            if (name === 'dashboard') refreshDashboardUsage();
+        }).catch(function() {
+            // Silent: transient polling errors must not replace the page.
+        }).then(function() { _pageRefreshInFlight = false; });
+    }
+
+    function markPageDirty(e) {
+        var content = document.getElementById('content');
+        if (!content || !content.contains(e.target)) return;
+        if (e.type === 'click') {
+            var el = e.target.closest('[data-action]');
+            if (!el) return;
+            var action = el.getAttribute('data-action') || '';
+            if (action === 'refresh' || /-details(-close)?$/.test(action)) return;
+        }
+        _pageDirty = true;
+    }
+
     // ----- Router -----
     var Router = {
         currentPage: 'dashboard',
@@ -459,6 +539,10 @@
             if (this.currentPage === 'dashboard' && name !== 'dashboard') {
                 stopDashboardRefresh();
             }
+            stopPageAutoRefresh();
+            _pageRenderSeq++;
+            _pageDirty = false;
+            var renderSeq = _pageRenderSeq;
             this.currentPage = name;
             var items = document.querySelectorAll('.nav-item');
             for (var i = 0; i < items.length; i++) {
@@ -483,6 +567,10 @@
                     if (name === 'scan-management') startScanManagementRefresh();
                     if (name === 'monitoring') startMonitorActivityRefresh();
                     if (name === 'dashboard') startDashboardRefresh();
+                    if (renderSeq === _pageRenderSeq) {
+                        _lastPageHtml = html;
+                        startPageAutoRefresh(name);
+                    }
                 }).catch(function(err) {
                     content.innerHTML = '<div class="card"><p style="color:red;">Error: ' + escapeHtml(err.message) + '</p></div>';
                 });
@@ -524,6 +612,9 @@
                     self.navigate('config');
                 });
             }
+            document.addEventListener('input', markPageDirty, true);
+            document.addEventListener('change', markPageDirty, true);
+            document.addEventListener('click', markPageDirty, true);
             // Delegated click handler for all dynamically rendered buttons/tabs.
             // Uses data-action attributes (CSP-safe, no inline onclick needed).
             document.addEventListener('click', function(e) {
@@ -942,7 +1033,7 @@
         if (active.length === 0) {
             h += '<p style="padding:12px;color:var(--text-muted);">No active scans.</p>';
         } else {
-            h += '<table><thead><tr><th>Scan ID</th><th>Directory</th><th>State</th><th>Engine</th><th>PID</th><th>Files scanned</th><th>Hits</th><th>Elapsed</th><th>Actions</th></tr></thead><tbody>';
+            h += '<table><thead><tr><th>Scan ID</th><th>Directory</th><th>State</th><th>Engine</th><th>PID</th><th>Files scanned</th><th>Total files</th><th>Hits</th><th>Elapsed</th><th>Actions</th></tr></thead><tbody>';
             for (var i = 0; i < active.length; i++) {
                 var s = active[i];
                 var progress = s.progress || {};
@@ -963,7 +1054,7 @@
                 var hitLabel = hitCount > 0 ?
                     '<span class="badge bg-danger">' + hitCount + ' detected</span>' :
                     '<span class="badge bg-success">No hits</span>';
-                h += '<td>' + (s.pid || '-') + '</td><td>' + progressBar + '<div class="scan-files-count">' + filesText + '</div></td><td>' + hitLabel + '</td><td>' + fmtDuration(s.elapsed) + '</td>';
+                h += '<td>' + (s.pid || '-') + '</td><td>' + progressBar + '<div class="scan-files-count">' + filesText + '</div></td><td>' + (total > 0 ? total : '-') + '</td><td>' + hitLabel + '</td><td>' + fmtDuration(s.elapsed) + '</td>';
                 h += '<td><button class="btn btn-ghost btn-sm" data-action="scan-details" data-id="' + escapeHtml(s.scan_id || '') + '">Details</button> ';
                 h += '<button class="btn btn-danger btn-sm" data-action="scan-stop" data-id="' + escapeHtml(s.scan_id || '') + '">Stop</button></td></tr>';
             }
@@ -1914,18 +2005,18 @@
         return API.get('/system').then(function(data) {
             var sys = data.system;
             var h = '<div class="card"><div class="card-header"><span class="card-title">Updates</span></div><table>';
-            h += '<tr><td>LMD Version</td><td>' + escapeHtml(sys.version || 'unknown') + '</td>';
+            h += '<tr><td>LMD Version</td><td>' + escapeHtml(sys.version || trUpdate('unknown')) + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-ver">Update</button> <button class="btn btn-warning btn-sm" data-action="update-ver-beta">Beta</button></td></tr>';
-            h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || 'unknown') + ' (' + escapeHtml(sys.clamav_status || 'missing') + ')</td>';
+            h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || trUpdate('unknown')) + ' (' + escapeHtml(trUpdate(sys.clamav_status || 'missing')) + ')</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-clamav">' + tr('Update ClamAV') + '</button></td></tr>';
-            h += '<tr><td>Signatures</td><td>' + escapeHtml(sys.signature_version || 'unknown') + '</td>';
+            h += '<tr><td>Signatures</td><td>' + escapeHtml(sys.signature_version || trUpdate('unknown')) + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-sigs">Update Sigs</button></td></tr>';
             h += '</table></div>';
             h += '<div class="card"><div class="card-header"><span class="card-title">Installer location</span></div>';
             h += '<p><strong>Installation directory:</strong> <code>' +
-                escapeHtml(sys.base_dir || 'unknown') + '</code></p>';
+                escapeHtml(sys.base_dir || trUpdate('unknown')) + '</code></p>';
             h += '<p><strong>Installer directory:</strong> <code>' +
-                escapeHtml(sys.installer_directory || 'Not available in the installed runtime') + '</code></p>';
+                escapeHtml(sys.installer_directory || tr('Not available in the installed runtime')) + '</code></p>';
             if (sys.installer_path) {
                 h += '<p><strong>Installer:</strong> <code>' + escapeHtml(sys.installer_path) + '</code></p>';
             }
@@ -1937,11 +2028,11 @@
                 var status = d.status || (d.returncode === 0 ? 'completed' : 'failed');
                 var statusColor = status === 'completed' ? 'var(--success)' : 'var(--danger)';
                 h += '<p><strong>Status:</strong> <span style="color:' + statusColor + ';">' +
-                    escapeHtml(status) + '</span></p>';
-                h += '<p><strong>Operation:</strong> ' + escapeHtml(d.operation || 'Update') + '</p>';
-                h += '<p>Before: <code>' + escapeHtml(updateValue(d.before)) + '</code> &nbsp; After: <code>' +
-                    escapeHtml(updateValue(d.after)) + '</code> &nbsp; Changed: <strong>' +
-                    (d.changed ? 'yes' : 'no') + '</strong></p>';
+                    escapeHtml(trUpdate(status)) + '</span></p>';
+                h += '<p><strong>Operation:</strong> ' + escapeHtml(trUpdate(d.operation || 'Update')) + '</p>';
+                h += '<p><span>Before:</span> <code>' + escapeHtml(updateValue(d.before)) + '</code> &nbsp; <span>After:</span> <code>' +
+                    escapeHtml(updateValue(d.after)) + '</code> &nbsp; <span>Changed:</span> <strong>' +
+                    trUpdate(d.changed ? 'yes' : 'no') + '</strong></p>';
                 h += '<details><summary>Command output</summary><pre class="report-json">' +
                     escapeHtml(output || 'No output returned by maldet.') + '</pre></details></div>';
             }
@@ -1950,30 +2041,42 @@
     }
 
     function updateValue(value) {
-        if (!value) return 'unknown';
+        if (!value) return trUpdate('unknown');
         var keys = Object.keys(value);
-        return keys.length ? String(value[keys[0]]) : 'unknown';
+        return keys.length && value[keys[0]] ? String(value[keys[0]]) : trUpdate('unknown');
+    }
+
+    // Update-page values use an "update:" key prefix so generic words (yes/no,
+    // completed/failed) are not rewritten on other pages by translateDom.
+    function trUpdate(value) {
+        var key = 'update:' + value, text = tr(key);
+        return text === key ? value : text;
+    }
+
+    function updateErrorMessage(err) {
+        // Failed updates return the full payload (no "error" field); point to the details card.
+        return err.data && err.data.operation ? tr('see the update details below') : tr(err.message);
     }
 
     function updateVer(beta) {
         API.post('/update/version', { beta: beta }).then(function(data) {
             _lastUpdateDetails = data;
-            toast(data.changed ? 'Update complete: version changed' : tr('Update complete: already current'), 'success');
+            toast(tr(data.changed ? 'Update complete: version changed' : 'Update complete: already current'), 'success');
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
-            toast('Update failed: ' + err.message, 'error');
+            toast(tr('Update failed: ') + updateErrorMessage(err), 'error');
             Router.navigate('updates');
         });
     }
     function updateSigs() {
         API.post('/update/sigs', {}).then(function(data) {
             _lastUpdateDetails = data;
-            toast(data.changed ? 'Signatures updated' : 'Signatures already current', 'success');
+            toast(tr(data.changed ? 'Signatures updated' : 'Signatures already current'), 'success');
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
-            toast('Signature update failed: ' + err.message, 'error');
+            toast(tr('Signature update failed: ') + updateErrorMessage(err), 'error');
             Router.navigate('updates');
         });
     }
@@ -1984,7 +2087,7 @@
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
-            toast(tr('ClamAV update failed: ') + err.message, 'error');
+            toast(tr('ClamAV update failed: ') + updateErrorMessage(err), 'error');
             Router.navigate('updates');
         });
     }
@@ -2421,6 +2524,10 @@
             '<section class="about-html-card"><h2>Recursos / Key Features</h2><div class="about-feature-grid">' +
             '<div><div class="about-lang-title">Português (Brasil)</div><ul><li>Engine nativo do Maldet</li><li>Quarentena e detalhes por arquivo</li><li>Monitoramento inotify por usuário</li><li>Alertas e relatórios</li><li>Assinaturas atualizáveis</li></ul></div>' +
             '<div><div class="about-lang-title">English</div><ul><li>Maldet native engine</li><li>Quarantine with per-file details</li><li>Per-user inotify monitoring</li><li>Alerts and reports</li><li>Updatable signatures</li></ul></div></div></section>' +
+            '<section class="about-html-card"><h2>Desenvolvedor / Developer</h2>' +
+            '<p><strong>Bithostel</strong></p>' +
+            '<ul><li>Website: <a href="https://bithostel.com.br" target="_blank" rel="noopener noreferrer">bithostel.com.br</a></li>' +
+            '<li>E-mail: <a href="mailto:hostmaster@bithostel.com.br">hostmaster@bithostel.com.br</a></li></ul></section>' +
             '</main><footer class="about-html-footer"><p><strong>Uso responsável / Responsible use:</strong><br>Use o Maldet em sistemas que você administra e mantenha as assinaturas atualizadas.<br><em>Use Maldet on systems you administer and keep signatures up to date.</em></p></footer></div>';
     }
 

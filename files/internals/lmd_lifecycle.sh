@@ -617,9 +617,9 @@ _session_index_rebuild() {
 			[ -z "$_r_scanid" ] && continue
 			# Compute epoch from started_hr; fall back to file mtime
 			_r_epoch=$(command date -d "$_r_started_hr" "+%s" 2>/dev/null) || _r_epoch=0  # safe: date parse failure falls back to 0
-			# Count quarantined hits: lines where field 3 (quarpath) is non-empty and not "-"
+			# Count quarantined files: distinct non-empty field 3 (quarpath) values
 			local _r_tot_quar
-			_r_tot_quar=$(awk -F'\t' '!/^#/ && $3 != "" && $3 != "-" { n++ } END { print n+0 }' "$_tsv_file")
+			_r_tot_quar=$(awk -F'\t' '!/^#/ && $3 != "" && $3 != "-" && !seen[$3]++ { n++ } END { print n+0 }' "$_tsv_file")
 			printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
 				"$_r_scanid" "$_r_epoch" "$_r_started_hr" "${_r_elapsed:--}" \
 				"${_r_tot_files:--}" "${_r_tot_hits:--}" "${_r_tot_cl:--}" \
