@@ -444,6 +444,70 @@
         _statusTimer = setInterval(updateStatusIndicator, 5000);
     }
 
+    // ----- Page auto-refresh -----
+    // Silently re-renders the current page so it always shows fresh data.
+    // Config is excluded (editing form) and Scan Management has its own
+    // faster live refresh. Refresh pauses while the user is interacting
+    // (focused field, edited input, open modal, started an action) so no
+    // typed data or in-progress feedback is ever wiped.
+    var PAGE_AUTO_REFRESH_MS = 10000;
+    var PAGE_AUTO_REFRESH_EXCLUDE = { config: true, 'scan-management': true };
+    var _pageRefreshTimer = null;
+    var _pageRefreshInFlight = false;
+    var _pageDirty = false;
+    var _pageRenderSeq = 0;
+    var _lastPageHtml = '';
+
+    function stopPageAutoRefresh() {
+        if (_pageRefreshTimer) { clearInterval(_pageRefreshTimer); _pageRefreshTimer = null; }
+    }
+
+    function startPageAutoRefresh(name) {
+        stopPageAutoRefresh();
+        if (PAGE_AUTO_REFRESH_EXCLUDE[name]) return;
+        _pageRefreshTimer = setInterval(pageAutoRefreshTick, PAGE_AUTO_REFRESH_MS);
+    }
+
+    function pageIsBusy(content) {
+        if (_pageDirty || document.hidden) return true;
+        if (document.querySelector('.modal-backdrop')) return true;
+        var ae = document.activeElement;
+        return !!(ae && content.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName));
+    }
+
+    function pageAutoRefreshTick() {
+        var name = Router.currentPage;
+        var content = document.getElementById('content');
+        if (!content || PAGE_AUTO_REFRESH_EXCLUDE[name] || !Router.routes[name]) return;
+        if (_pageRefreshInFlight || pageIsBusy(content)) return;
+        var seq = _pageRenderSeq;
+        _pageRefreshInFlight = true;
+        Promise.resolve(Router.routes[name]()).then(function(html) {
+            if (seq !== _pageRenderSeq || Router.currentPage !== name) return;
+            if (html === _lastPageHtml || pageIsBusy(content)) return;
+            var scroll = content.scrollTop;
+            content.innerHTML = html;
+            translateDom(content);
+            content.scrollTop = scroll;
+            _lastPageHtml = html;
+            if (name === 'dashboard') refreshDashboardUsage();
+        }).catch(function() {
+            // Silent: transient polling errors must not replace the page.
+        }).then(function() { _pageRefreshInFlight = false; });
+    }
+
+    function markPageDirty(e) {
+        var content = document.getElementById('content');
+        if (!content || !content.contains(e.target)) return;
+        if (e.type === 'click') {
+            var el = e.target.closest('[data-action]');
+            if (!el) return;
+            var action = el.getAttribute('data-action') || '';
+            if (action === 'refresh' || /-details(-close)?$/.test(action)) return;
+        }
+        _pageDirty = true;
+    }
+
     // ----- Router -----
     var Router = {
         currentPage: 'dashboard',
@@ -459,6 +523,10 @@
             if (this.currentPage === 'dashboard' && name !== 'dashboard') {
                 stopDashboardRefresh();
             }
+            stopPageAutoRefresh();
+            _pageRenderSeq++;
+            _pageDirty = false;
+            var renderSeq = _pageRenderSeq;
             this.currentPage = name;
             var items = document.querySelectorAll('.nav-item');
             for (var i = 0; i < items.length; i++) {
@@ -483,6 +551,10 @@
                     if (name === 'scan-management') startScanManagementRefresh();
                     if (name === 'monitoring') startMonitorActivityRefresh();
                     if (name === 'dashboard') startDashboardRefresh();
+                    if (renderSeq === _pageRenderSeq) {
+                        _lastPageHtml = html;
+                        startPageAutoRefresh(name);
+                    }
                 }).catch(function(err) {
                     content.innerHTML = '<div class="card"><p style="color:red;">Error: ' + escapeHtml(err.message) + '</p></div>';
                 });
@@ -524,6 +596,9 @@
                     self.navigate('config');
                 });
             }
+            document.addEventListener('input', markPageDirty, true);
+            document.addEventListener('change', markPageDirty, true);
+            document.addEventListener('click', markPageDirty, true);
             // Delegated click handler for all dynamically rendered buttons/tabs.
             // Uses data-action attributes (CSP-safe, no inline onclick needed).
             document.addEventListener('click', function(e) {
