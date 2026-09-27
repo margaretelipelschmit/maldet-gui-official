@@ -1376,9 +1376,9 @@ tr:hover td {
 }
 
 .toast {
-    padding: 7px 10px;
+    padding: 5px 7px;
     border-radius: 4px;
-    font-size: 35px;
+    font-size: 24px;
     font-weight: 500;
     box-shadow: var(--shadow);
     animation: slideIn 0.3s ease;
