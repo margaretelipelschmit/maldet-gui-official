@@ -39,7 +39,7 @@ CONF_FILE = "conf.maldet"
 LOG_DIR = "/var/log/maldet"
 EVENT_LOG = "event_log"
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 32501
+DEFAULT_PORT = 8080
 
 MIME_TYPES = {
     ".html": "text/html", ".css": "text/css", ".js": "application/javascript",

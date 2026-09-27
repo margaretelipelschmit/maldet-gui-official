@@ -4,8 +4,11 @@
 #
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-URL="${MALDET_GUI_URL:-http://127.0.0.1:${MALDET_GUI_PORT:-32501}}"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+if [ -z "${MALDET_GUI_PORT:-}" ] && [ -r /etc/default/maldet-gui ]; then
+	MALDET_GUI_PORT=$(sed -n 's/^MALDET_GUI_PORT=["'\'']\{0,1\}\([0-9]*\).*/\1/p' /etc/default/maldet-gui | tail -n1)
+fi
+URL="${MALDET_GUI_URL:-http://127.0.0.1:${MALDET_GUI_PORT:-8080}}"
 LAUNCHER="${MALDET_GUI_LAUNCHER:-$SCRIPT_DIR/launch.sh}"
 LOG="${MALDET_GUI_LOG:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/maldet/gui.log}"
 
@@ -18,7 +21,7 @@ fi
 	exit 1
 }
 
-if ! python3 - "$URL/api/check" <<'PY' >/dev/null 2>&1
+if ! python3 - "$URL/api/auth/status" <<'PY' >/dev/null 2>&1
 import sys
 from urllib.request import urlopen
 with urlopen(sys.argv[1], timeout=2) as response:
@@ -29,7 +32,7 @@ then
 	nohup "$LAUNCHER" >>"$LOG" 2>&1 </dev/null &
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		sleep 1
-		if python3 - "$URL/api/check" <<'PY' >/dev/null 2>&1
+		if python3 - "$URL/api/auth/status" <<'PY' >/dev/null 2>&1
 import sys
 from urllib.request import urlopen
 with urlopen(sys.argv[1], timeout=2) as response:

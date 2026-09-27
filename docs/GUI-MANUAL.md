@@ -11,7 +11,7 @@ permite iniciar e acompanhar scans, administrar quarentena, consultar
 relatórios, controlar o monitor inotify, atualizar assinaturas e configurar
 alertas.
 
-Por padrão, a interface atende somente em `127.0.0.1:32501`. Isso reduz a
+Por padrão, a interface atende somente em `127.0.0.1:8080`. Isso reduz a
 superfície de exposição: para acesso remoto, use um proxy reverso com
 autenticação e TLS; não exponha o servidor diretamente sem proteção.
 
@@ -46,7 +46,7 @@ maldet-webgui
 ```
 
 Esse comando inicia o servidor em segundo plano, espera o endpoint de saúde e
-abre o navegador em `http://127.0.0.1:32501`.
+abre o navegador em `http://127.0.0.1:8080`.
 
 Após uma instalação como root, o serviço `maldet-gui` é habilitado para
 inicialização automática no boot quando systemd ou SysV está disponível.
@@ -76,7 +76,7 @@ O arquivo de log do launcher é normalmente
 
 ```bash
 python3 /usr/local/maldetect/gui/maldet_gui.py \
-  --host 127.0.0.1   --port 32501 \
+  --host 127.0.0.1   --port 8080 \
   --base-dir /usr/local/maldetect
 ```
 
@@ -95,7 +95,7 @@ iniciá-lo automaticamente.
 Variáveis úteis:
 
 ```bash
-MALDET_GUI_URL=http://127.0.0.1:32501
+MALDET_GUI_URL=http://127.0.0.1:8080
 MALDET_SYSTRAY_INTERVAL=5
 MALDET_SYSTRAY_START_GUI=1
 ```
@@ -208,8 +208,8 @@ hits e fim; falhas de entrega devem ser investigadas no Event Log.
 Verifique a saúde:
 
 ```bash
-curl -sS http://127.0.0.1:32501/api/check
-curl -sS http://127.0.0.1:32501/api/scans/active
+curl -sS http://127.0.0.1:8080/api/check
+curl -sS http://127.0.0.1:8080/api/scans/active
 ```
 
 Endpoints úteis:
