@@ -211,6 +211,24 @@ _create_session_tsv() {
     [ ! -f "$sessdir/session.index.tmp" ]
 }
 
+@test "session index: rebuild counts quarantined files, not per-signature hit lines" {
+    _source_lmd_stack
+    rm -f "$sessdir/session.index"
+    _create_session_tsv "260327-1000.8888" "Mar 27 2026 10:00:22 +0000" "50" "100" "4" "0" "/home/multi"
+    local _tsv="$sessdir/session.tsv.260327-1000.8888"
+    # One file matched by three YARA rules shares a single quarantine path,
+    # plus one separate file quarantined and one detected-only hit.
+    printf '{YARA}rule.a\t/home/multi/x.php\t/q/x.php.1\tYARA\n' >> "$_tsv"
+    printf '{YARA}rule.b\t/home/multi/x.php\t/q/x.php.1\tYARA\n' >> "$_tsv"
+    printf '{YARA}rule.c\t/home/multi/x.php\t/q/x.php.1\tYARA\n' >> "$_tsv"
+    printf '{HEX}sig.d\t/home/multi/y.php\t/q/y.php.2\tHEX\n' >> "$_tsv"
+    printf '{HEX}sig.e\t/home/multi/z.php\t-\tHEX\n' >> "$_tsv"
+    _session_index_rebuild
+    local _quar
+    _quar=$(awk -F'\t' '$1 == "260327-1000.8888" { print $8 }' "$sessdir/session.index")
+    [ "$_quar" = "2" ]
+}
+
 # ========================================================================
 # Schema 1.2 pre-flight: TSV field-position fixture
 # ========================================================================

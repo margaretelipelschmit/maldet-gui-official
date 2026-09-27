@@ -376,7 +376,7 @@ view_report() {
 				local _cl="${tot_cl:-0}"
 				[ "$_cl" = "-" ] && _cl="0"
 				local _quar
-				_quar=$(awk -F'\t' '!/^#/ && $3 != "" && $3 != "-" { n++ } END { print n+0 }' "$file")
+				_quar=$(awk -F'\t' '!/^#/ && $3 != "" && $3 != "-" && !seen[$3]++ { n++ } END { print n+0 }' "$file")
 				echo "$_time_u | $_time_display | $scanid | $_etime | ${tot_files:--} | ${tot_hits:--} | $_quar | $_cl | ${hrspath:--}" >> "$tmpf"
 				_seen_ids="$_seen_ids $_sid"
 			fi
@@ -699,9 +699,10 @@ _scan_finalize_session() {
 		nsess="$nsess_hits"
 	fi
 
-	# Count quarantined hits from TSV: lines where field 3 (quarpath) is non-empty and not "-"
+	# Count quarantined files from TSV: distinct non-empty field 3 (quarpath) values;
+	# one file can yield several hit lines (e.g. multiple YARA rules)
 	local _tot_quar
-	_tot_quar=$(awk -F'\t' '!/^#/ && $3 != "" && $3 != "-" { n++ } END { print n+0 }' "$nsess_hits")
+	_tot_quar=$(awk -F'\t' '!/^#/ && $3 != "" && $3 != "-" && !seen[$3]++ { n++ } END { print n+0 }' "$nsess_hits")
 
 	# Resolve trailing fields for v1.2 index schema (fields 10-14).
 	# sig_version: prefer runtime $sig_version; fall back to on-disk sigs.ver sentinel.
