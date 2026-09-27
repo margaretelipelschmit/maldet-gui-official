@@ -250,10 +250,26 @@
             'Signature Set': 'Conjunto de assinaturas', 'Monitor': 'Monitor',
             'ONLINE': 'ATIVO', 'OFFLINE': 'INATIVO', 'Maldet native (live file progress)': 'Maldet nativo (progresso em tempo real)',
             'ClamAV/clamdscan (faster, limited progress)': 'ClamAV/clamdscan (mais rápido, progresso limitado)',
-            'ClamAV updated': 'ClamAV atualizado',
-            'ClamAV already current': 'ClamAV já está atualizado',
+            'ClamAV updated': 'Base de dados do ClamAV atualizada',
+            'ClamAV already current': 'A base de dados do ClamAV já está atualizada',
             'ClamAV update failed: ': 'Falha ao atualizar o ClamAV: ',
-            'Update complete: already current': 'Atualização completa: já atualizado',
+            'Update complete: already current': 'Atualização concluída: o Maldet já está na versão mais recente',
+            'Update complete: version changed': 'Atualização concluída: nova versão do Maldet instalada',
+            'Update failed: ': 'Falha na atualização: ',
+            'Signatures updated': 'Assinaturas atualizadas com sucesso',
+            'Signatures already current': 'As assinaturas já estão atualizadas',
+            'Signature update failed: ': 'Falha ao atualizar as assinaturas: ',
+            'see the update details below': 'veja os detalhes da atualização abaixo',
+            'LMD Version': 'Versão do LMD', 'Signatures': 'Assinaturas',
+            'Installer location': 'Local do instalador',
+            'Not available in the installed runtime': 'Não disponível na instalação atual',
+            'update:unknown': 'desconhecido', 'update:missing': 'ausente', 'update:available': 'disponível',
+            'update:completed': 'concluída', 'update:failed': 'falhou', 'update:yes': 'sim', 'update:no': 'não',
+            'update:Update': 'Atualização',
+            'update:signature update': 'Atualização de assinaturas',
+            'update:version update': 'Atualização de versão',
+            'update:beta version update': 'Atualização para a versão beta',
+            'update:clamav database update': 'Atualização da base de dados do ClamAV',
             'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Scan concluído — ameaças encontradas!',
             'Scan complete - no malware': 'Scan concluído — nenhum malware encontrado',
             'Scan started in background': 'Scan iniciado em segundo plano', 'Monitor started': 'Monitor iniciado',
@@ -1989,18 +2005,18 @@
         return API.get('/system').then(function(data) {
             var sys = data.system;
             var h = '<div class="card"><div class="card-header"><span class="card-title">Updates</span></div><table>';
-            h += '<tr><td>LMD Version</td><td>' + escapeHtml(sys.version || 'unknown') + '</td>';
+            h += '<tr><td>LMD Version</td><td>' + escapeHtml(sys.version || trUpdate('unknown')) + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-ver">Update</button> <button class="btn btn-warning btn-sm" data-action="update-ver-beta">Beta</button></td></tr>';
-            h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || 'unknown') + ' (' + escapeHtml(sys.clamav_status || 'missing') + ')</td>';
+            h += '<tr><td>ClamAV</td><td>' + escapeHtml(sys.clamav_version || trUpdate('unknown')) + ' (' + escapeHtml(trUpdate(sys.clamav_status || 'missing')) + ')</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-clamav">' + tr('Update ClamAV') + '</button></td></tr>';
-            h += '<tr><td>Signatures</td><td>' + escapeHtml(sys.signature_version || 'unknown') + '</td>';
+            h += '<tr><td>Signatures</td><td>' + escapeHtml(sys.signature_version || trUpdate('unknown')) + '</td>';
             h += '<td><button class="btn btn-primary btn-sm" data-action="update-sigs">Update Sigs</button></td></tr>';
             h += '</table></div>';
             h += '<div class="card"><div class="card-header"><span class="card-title">Installer location</span></div>';
             h += '<p><strong>Installation directory:</strong> <code>' +
-                escapeHtml(sys.base_dir || 'unknown') + '</code></p>';
+                escapeHtml(sys.base_dir || trUpdate('unknown')) + '</code></p>';
             h += '<p><strong>Installer directory:</strong> <code>' +
-                escapeHtml(sys.installer_directory || 'Not available in the installed runtime') + '</code></p>';
+                escapeHtml(sys.installer_directory || tr('Not available in the installed runtime')) + '</code></p>';
             if (sys.installer_path) {
                 h += '<p><strong>Installer:</strong> <code>' + escapeHtml(sys.installer_path) + '</code></p>';
             }
@@ -2012,11 +2028,11 @@
                 var status = d.status || (d.returncode === 0 ? 'completed' : 'failed');
                 var statusColor = status === 'completed' ? 'var(--success)' : 'var(--danger)';
                 h += '<p><strong>Status:</strong> <span style="color:' + statusColor + ';">' +
-                    escapeHtml(status) + '</span></p>';
-                h += '<p><strong>Operation:</strong> ' + escapeHtml(d.operation || 'Update') + '</p>';
-                h += '<p>Before: <code>' + escapeHtml(updateValue(d.before)) + '</code> &nbsp; After: <code>' +
-                    escapeHtml(updateValue(d.after)) + '</code> &nbsp; Changed: <strong>' +
-                    (d.changed ? 'yes' : 'no') + '</strong></p>';
+                    escapeHtml(trUpdate(status)) + '</span></p>';
+                h += '<p><strong>Operation:</strong> ' + escapeHtml(trUpdate(d.operation || 'Update')) + '</p>';
+                h += '<p><span>Before:</span> <code>' + escapeHtml(updateValue(d.before)) + '</code> &nbsp; <span>After:</span> <code>' +
+                    escapeHtml(updateValue(d.after)) + '</code> &nbsp; <span>Changed:</span> <strong>' +
+                    trUpdate(d.changed ? 'yes' : 'no') + '</strong></p>';
                 h += '<details><summary>Command output</summary><pre class="report-json">' +
                     escapeHtml(output || 'No output returned by maldet.') + '</pre></details></div>';
             }
@@ -2025,30 +2041,42 @@
     }
 
     function updateValue(value) {
-        if (!value) return 'unknown';
+        if (!value) return trUpdate('unknown');
         var keys = Object.keys(value);
-        return keys.length ? String(value[keys[0]]) : 'unknown';
+        return keys.length && value[keys[0]] ? String(value[keys[0]]) : trUpdate('unknown');
+    }
+
+    // Update-page values use an "update:" key prefix so generic words (yes/no,
+    // completed/failed) are not rewritten on other pages by translateDom.
+    function trUpdate(value) {
+        var key = 'update:' + value, text = tr(key);
+        return text === key ? value : text;
+    }
+
+    function updateErrorMessage(err) {
+        // Failed updates return the full payload (no "error" field); point to the details card.
+        return err.data && err.data.operation ? tr('see the update details below') : tr(err.message);
     }
 
     function updateVer(beta) {
         API.post('/update/version', { beta: beta }).then(function(data) {
             _lastUpdateDetails = data;
-            toast(data.changed ? 'Update complete: version changed' : tr('Update complete: already current'), 'success');
+            toast(tr(data.changed ? 'Update complete: version changed' : 'Update complete: already current'), 'success');
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
-            toast('Update failed: ' + err.message, 'error');
+            toast(tr('Update failed: ') + updateErrorMessage(err), 'error');
             Router.navigate('updates');
         });
     }
     function updateSigs() {
         API.post('/update/sigs', {}).then(function(data) {
             _lastUpdateDetails = data;
-            toast(data.changed ? 'Signatures updated' : 'Signatures already current', 'success');
+            toast(tr(data.changed ? 'Signatures updated' : 'Signatures already current'), 'success');
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
-            toast('Signature update failed: ' + err.message, 'error');
+            toast(tr('Signature update failed: ') + updateErrorMessage(err), 'error');
             Router.navigate('updates');
         });
     }
@@ -2059,7 +2087,7 @@
             Router.navigate('updates');
         }).catch(function(err) {
             if (err.data) _lastUpdateDetails = err.data;
-            toast(tr('ClamAV update failed: ') + err.message, 'error');
+            toast(tr('ClamAV update failed: ') + updateErrorMessage(err), 'error');
             Router.navigate('updates');
         });
     }
