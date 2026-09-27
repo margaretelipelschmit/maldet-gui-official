@@ -279,8 +279,12 @@ scan_cpulimit="0"
 # scheduling priority (which does nothing on an otherwise idle core), not
 # an absolute usage ceiling. Requires the 'cpulimit' binary; set to 0 to
 # disable (clamd will then only be reniced, not hard-capped).
-# [ default = 50, i.e. half of one core ]
-scan_clamd_cpulimit="50"
+# "auto" caps clamd at half of the host's total CPU (nproc * 50), e.g. 200
+# on a 4-core server; a number is a percentage of one core (100 = 1 core).
+# clamdscan runs with --multiscan so clamd's MaxThreads workers scan in
+# parallel instead of one file at a time.
+# [ default = auto, i.e. half of all cores ]
+scan_clamd_cpulimit="auto"
 
 # As a design and common use case, LMD typically only scans user space paths
 # and as such it makes sense to ignore files that are root owned. It is
