@@ -2421,6 +2421,10 @@
             '<section class="about-html-card"><h2>Recursos / Key Features</h2><div class="about-feature-grid">' +
             '<div><div class="about-lang-title">Português (Brasil)</div><ul><li>Engine nativo do Maldet</li><li>Quarentena e detalhes por arquivo</li><li>Monitoramento inotify por usuário</li><li>Alertas e relatórios</li><li>Assinaturas atualizáveis</li></ul></div>' +
             '<div><div class="about-lang-title">English</div><ul><li>Maldet native engine</li><li>Quarantine with per-file details</li><li>Per-user inotify monitoring</li><li>Alerts and reports</li><li>Updatable signatures</li></ul></div></div></section>' +
+            '<section class="about-html-card"><h2>Desenvolvedor / Developer</h2>' +
+            '<p><strong>Bithostel</strong></p>' +
+            '<ul><li>Website: <a href="https://bithostel.com.br" target="_blank" rel="noopener noreferrer">bithostel.com.br</a></li>' +
+            '<li>E-mail: <a href="mailto:hostmaster@bithostel.com.br">hostmaster@bithostel.com.br</a></li></ul></section>' +
             '</main><footer class="about-html-footer"><p><strong>Uso responsável / Responsible use:</strong><br>Use o Maldet em sistemas que você administra e mantenha as assinaturas atualizadas.<br><em>Use Maldet on systems you administer and keep signatures up to date.</em></p></footer></div>';
     }
 
