@@ -27,6 +27,13 @@ sudo bash install.sh
 O instalador identifica a distribuição, verifica dependências e instala o
 Maldet, a GUI e os launchers:
 
+Em uma instalação nova, o instalador copia `files/conf.maldet` para
+`/usr/local/maldetect/conf.maldet` com o monitor no modo `users` (todos os
+diretórios pessoais, não apenas `public_html`), quarentena automática ativada,
+verificação de assinaturas a cada 6 horas e WebGUI na porta 8080. O resumo
+**Installed configuration** exibe os valores instalados. Em atualizações,
+`importconf` preserva as configurações personalizadas, sem redefini-las.
+
 Durante a instalação, cada etapa mostra `[running]`, `[ok]` ou `[failed]`,
 incluindo o tempo gasto e o código de saída em caso de falha. Ao final,
 **Process status** mostra o estado e PID dos serviços `maldet` e `maldet-gui`

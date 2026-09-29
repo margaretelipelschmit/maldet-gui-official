@@ -371,7 +371,7 @@ quarantine_on_error="1"
 # specify a file/directory path. Leave empty to disable automatic monitoring
 # — the service will exit cleanly until this is explicitly configured.
 # Can also be set via MONITOR_MODE in /etc/sysconfig/maldet or /etc/default/maldet.
-default_monitor_mode="user"
+default_monitor_mode="users"
 # default_monitor_mode="users"
 # default_monitor_mode="/usr/local/maldetect/monitor_paths"
 

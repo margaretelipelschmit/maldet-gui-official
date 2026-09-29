@@ -506,6 +506,17 @@ _postinfo() {
 	pkg_item "Exec link" "/usr/local/sbin/maldet"
 	pkg_item "Exec link" "/usr/local/sbin/lmd"
 	pkg_item "Cron.daily" "/etc/cron.daily/maldet"
+	pkg_section "Installed configuration"
+	pkg_item "Default monitor mode" "$(_read_conf_value default_monitor_mode users)"
+	pkg_item "Quarantine hits" "$(_read_conf_value quarantine_hits 1)"
+	pkg_item "Sigup interval" "$(_read_conf_value sigup_interval 6)h"
+	if [ -f "$inspath/gui/maldet_gui.py" ]; then
+		local _gui_env="/etc/sysconfig/maldet-gui" _gui_port
+		[ -f "$_gui_env" ] || _gui_env="/etc/default/maldet-gui"
+		_gui_port=$(sed -n 's/^MALDET_GUI_PORT=//p' "$_gui_env" 2>/dev/null | tail -1)
+		_gui_port="${_gui_port//\"/}"
+		pkg_item "GUI port" "${_gui_port:-not configured}"
+	fi
 	pkg_section "Process status"
 	_install_service_status maldet
 	if [ -f "$inspath/gui/maldet_gui.py" ]; then
