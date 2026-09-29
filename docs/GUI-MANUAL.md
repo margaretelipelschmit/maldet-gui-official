@@ -171,7 +171,13 @@ o resultado depois que um scan termina.
 
 Permite iniciar, parar ou recarregar o monitor inotify e visualizar os paths
 monitorados. O monitor reage a arquivos criados ou alterados nos diretórios
-configurados.
+configurados. Em **Escopo dos diretórios dos usuários**, escolha **Todas as
+pastas de cada usuário (recursivo)** ou **Apenas public_html e htdocs de cada
+usuário** e salve; use **Recarregar** para aplicar ao monitor em execução.
+O modo restrito não inclui document roots adicionais, `/tmp`, `/var/tmp`,
+`/dev/shm` nem caminhos extras configurados. Se `inotify_docroot` tiver um
+valor personalizado, a tela o indica sem substituir esse valor até salvar
+um dos dois modos. A seleção individual de usuários continua independente.
 
 ### Updates
 
@@ -265,6 +271,10 @@ administração exige root.
 sudo bash /usr/local/maldetect/uninstall.sh
 ```
 
-O desinstalador remove os launchers, atalhos e arquivos instalados conforme o
-escopo normal do pacote. Preserve previamente relatórios ou configurações que
-precisem ser mantidos.
+Antes de remover a instalação, o desinstalador copia e confere a quarentena
+(incluindo arquivos `.info`) e `sess/quarantine.hist*` em um diretório protegido
+sob `/var/backups/maldetect/quarantine.*`. Se não conseguir criar ou conferir
+essa cópia, interrompe a desinstalação. Arquivos suspeitos **não são
+restaurados** automaticamente aos caminhos originais. Backups anteriores
+`/usr/local/maldetect.*` também não são apagados. Preserve separadamente
+relatórios e configurações que precisem ser mantidos.

@@ -286,6 +286,15 @@
             'Select the users whose home directories should be monitored. Changes take effect after Reload.':
                 'Selecione os usuários cujos diretórios home serão monitorados. As alterações entram em vigor após Recarregar.',
             'Save user selection': 'Salvar seleção de usuários',
+            'User directory scope': 'Escopo dos diretórios dos usuários',
+            'Only public_html and htdocs of each user': 'Apenas public_html e htdocs de cada usuário',
+            'All folders of each user (recursive)': 'Todas as pastas de cada usuário (recursivo)',
+            'Other paths configured manually': 'Outros caminhos configurados manualmente',
+            'In webroot-only mode, additional document roots and temporary folders are not watched. Reload to apply changes.':
+                'No modo apenas diretórios web, document roots adicionais e pastas temporárias não são monitorados. Recarregue para aplicar.',
+            'Changes take effect after Reload.': 'As alterações entram em vigor após Recarregar.',
+            'Save monitoring scope': 'Salvar escopo do monitoramento',
+            'Monitor scope saved': 'Escopo do monitoramento salvo',
             'No eligible home users found.': 'Nenhum usuário elegível em /home foi encontrado.',
             'Web server detection': 'Detecção de servidor web',
             'Web server detection is unavailable.': 'A detecção de servidor web está indisponível.',
@@ -645,6 +654,7 @@
                 else if (action === 'monitor-stop') monitorStop();
                 else if (action === 'monitor-reload') monitorReload();
                 else if (action === 'monitor-save-users') saveMonitorUsers();
+                else if (action === 'monitor-save-scope') saveMonitorScope();
                 else if (action === 'monitor-save-webserver') saveMonitorWebserver();
                 else if (action === 'update-ver') updateVer(false);
                 else if (action === 'update-ver-beta') updateVer(true);
@@ -1767,9 +1777,11 @@
             API.get('/system'), API.get('/monitor/users'),
             // Web server detection is best-effort; never block the page.
             API.get('/monitor/webserver').catch(function() { return {}; }),
-            API.get('/monitor/activity?lines=40').catch(function() { return {}; })
+            API.get('/monitor/activity?lines=40').catch(function() { return {}; }),
+            API.get('/monitor/scope')
         ]).then(function(results) {
-            var data = results[0], userData = results[1], ws = results[2] || {}, act = results[3] || {};
+            var data = results[0], userData = results[1], ws = results[2] || {},
+                act = results[3] || {}, scope = results[4];
             var sys = data.system;
             var h = '<div class="monitor-grid">';
             h += '<div class="card monitor-status-card"><div class="card-header"><span class="card-title">' + tr('Real-time monitoring (inotify)') + '</span><span class="monitor-badge">' + tr('Inotify') + '</span></div>';
@@ -1794,6 +1806,20 @@
                     escapeHtml(user.home) + ')</span></label>';
             });
             h += '</div><button class="btn btn-primary" data-action="monitor-save-users">' + tr('Save user selection') + '</button></div></div>';
+            h += '<div class="card monitor-scope-card"><div class="card-header"><span class="card-title">' +
+                tr('User directory scope') + '</span></div>';
+            h += '<select class="form-input" id="monitor-scope">';
+            [['recursive', 'All folders of each user (recursive)'],
+                ['webroots', 'Only public_html and htdocs of each user'],
+                ['custom', 'Other paths configured manually']].forEach(function(option) {
+                if (option[0] === 'custom' && scope.scope !== 'custom') return;
+                h += '<option value="' + option[0] + '"' + (scope.scope === option[0] ? ' selected' : '') +
+                    (option[0] === 'custom' ? ' disabled' : '') + '>' + tr(option[1]) + '</option>';
+            });
+            h += '</select><p class="form-help">' +
+                tr('In webroot-only mode, additional document roots and temporary folders are not watched. Reload to apply changes.') +
+                '</p><button class="btn btn-primary" data-action="monitor-save-scope">' +
+                tr('Save monitoring scope') + '</button></div>';
             // ---- Web server detection card (monitor public_html or not) ----
             h += '<div class="card monitor-webserver-card"><div class="card-header"><span class="card-title">' + tr('Web server detection') + '</span><span class="monitor-badge">' + tr('public_html') + '</span></div>';
             if (!ws || typeof ws.detected === 'undefined') {
@@ -1812,10 +1838,17 @@
                 }
                 h += '</ul>';
                 h += '<label class="checkbox-row"><input type="checkbox" id="monitor-docroot-toggle"' +
-                    (ws.autodetect === '1' ? ' checked' : '') + '> ' +
+                    (ws.autodetect === '1' ? ' checked' : '') +
+                    (scope.scope === 'webroots' ? ' disabled' : '') + '> ' +
                     tr('Monitor detected document roots (e.g. public_html)') + '</label>';
+                if (scope.scope === 'webroots') {
+                    h += '<p class="form-help">' +
+                        tr('In webroot-only mode, additional document roots and temporary folders are not watched. Reload to apply changes.') +
+                        '</p>';
+                }
                 h += '<p class="form-help">' + tr('Changes take effect after Reload or restarting the monitor.') + '</p>';
-                h += '<button class="btn btn-primary" data-action="monitor-save-webserver">' + tr('Save') + '</button>';
+                h += '<button class="btn btn-primary" data-action="monitor-save-webserver"' +
+                    (scope.scope === 'webroots' ? ' disabled' : '') + '>' + tr('Save') + '</button>';
             }
             h += '</div></div>';
             // ---- Monitor activity card (real-time scanned/changed files) ----
@@ -1936,9 +1969,17 @@
             toast((data && data.message) || 'User selection saved; reload the monitor', 'success');
         }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
     }
+    function saveMonitorScope() {
+        var select = document.getElementById('monitor-scope');
+        if (!select || select.value === 'custom') return;
+        API.put('/monitor/scope', { scope: select.value }).then(function(data) {
+            toast((data && data.message) || tr('Monitor scope saved'), 'success');
+            Router.navigate('monitoring');
+        }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
+    }
     function saveMonitorWebserver() {
         var toggle = document.getElementById('monitor-docroot-toggle');
-        if (!toggle) return;
+        if (!toggle || toggle.disabled) return;
         API.post('/monitor/webserver', { enabled: !!toggle.checked }).then(function(data) {
             toast((data && data.message) || 'Web server monitoring updated', 'success');
         }).catch(function(e) { toast('Error: ' + e.message, 'error'); });

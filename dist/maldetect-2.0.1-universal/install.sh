@@ -6,6 +6,13 @@
 #             (C) 2026, Ryan MacDonald <ryan@rfxn.com>
 # This program may be freely redistributed under the terms of the GNU GPL v2
 ##
+##
+# Linux Malware Detect (WebGUI - maldet-gui v1.0.0)
+#             (C) 2011-2026, bithostel <hostmaster@bithostel.com.br>
+#             (C) 2026, Fabio Schmit <https://bithostel.com.br>
+# This program may be freely redistributed under the terms of the GNU GPL v2
+#                      Universal Linux Server Setup v1.0.0
+##
 #
 PATH=$PATH:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 lmd_version="2.0.1"
@@ -273,6 +280,8 @@ clamav_paths="/usr/local/cpanel/3rdparty/share/clamav/ /var/lib/clamav/ /var/cla
 
 _install_core() {
 	pkg_copy_tree "files" "$inspath" || return $?
+	command cp -f uninstall.sh "$inspath/uninstall.sh" || return $?
+	chmod 755 "$inspath/uninstall.sh" || return $?
 	if [ -d "gui" ]; then
 		pkg_copy_tree "gui" "$inspath/gui" || return $?
 		chmod 755 "$inspath/gui/launch.sh" "$inspath/gui/open_gui.sh" \
@@ -370,6 +379,25 @@ _install_cron_service() {
 	pkg_cron_install cron.daily /etc/cron.daily/maldet || return $?
 	pkg_cron_install cron.watchdog /etc/cron.weekly/maldet-watchdog || return $?
 	pkg_cron_install cron.d.pub /etc/cron.d/maldet_pub || return $?
+	if [ -f "$inspath/gui/maldet_gui.py" ]; then
+		local _gui_cron=/etc/cron.d/maldet-gui-schedules
+		local _gui_json="$inspath/gui.schedules.json"
+		local _gui_previous_json="$_gui_json"
+		local _gui_backup
+		if [ -n "${bkpath:-}" ] && [ -f "$bkpath/gui.schedules.json" ]; then
+			_gui_previous_json="$bkpath/gui.schedules.json"
+		fi
+		if { [ -f "$_gui_cron" ] && ! cmp -s files/cron/maldet-gui-schedules "$_gui_cron"; } ||
+		   { [ -f "$_gui_previous_json" ] && ! cmp -s files/cron/gui.schedules.json "$_gui_previous_json"; }; then
+			command mkdir -p /var/backups || return $?
+			_gui_backup=$(command mktemp -d /var/backups/maldet-gui-schedules.XXXXXXXX) || return $?
+			[ ! -f "$_gui_cron" ] || command cp -p "$_gui_cron" "$_gui_backup/maldet-gui-schedules" || return $?
+			[ ! -f "$_gui_previous_json" ] || command cp -p "$_gui_previous_json" "$_gui_backup/gui.schedules.json" || return $?
+			pkg_info "Previous GUI schedules backed up to $_gui_backup"
+		fi
+		pkg_cron_install files/cron/maldet-gui-schedules "$_gui_cron" || return $?
+		command install -m 644 files/cron/gui.schedules.json "$_gui_json" || return $?
+	fi
 
 	# Independent sig update cron (sigup_interval, default 6h)
 	# Source installed conf.maldet to read sigup_interval — conf is already

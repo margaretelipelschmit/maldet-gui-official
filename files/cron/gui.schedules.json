@@ -1,0 +1,46 @@
+{
+  "schedules": [
+    {
+      "id": "sch_1790710984_d3cd59",
+      "name": "Daily /",
+      "path": "/",
+      "scan_type": "all",
+      "days": 1,
+      "frequency": "daily",
+      "hour": 3,
+      "minute": 0,
+      "weekday": 0,
+      "cron_expr": "",
+      "enabled": true,
+      "created_at": 1790710984
+    },
+    {
+      "id": "sch_1790711002_33afd5",
+      "name": "Weekly /",
+      "path": "/",
+      "scan_type": "all",
+      "days": 1,
+      "frequency": "weekly",
+      "hour": 3,
+      "minute": 0,
+      "weekday": 0,
+      "cron_expr": "",
+      "enabled": true,
+      "created_at": 1790711002
+    },
+    {
+      "id": "sch_1790711071_919e96",
+      "name": "Tesrt",
+      "path": "/home/status",
+      "scan_type": "recent",
+      "days": 1,
+      "frequency": "daily",
+      "hour": 16,
+      "minute": 45,
+      "weekday": 0,
+      "cron_expr": "",
+      "enabled": true,
+      "created_at": 1790711071
+    }
+  ]
+}

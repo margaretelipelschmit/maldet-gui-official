@@ -11,7 +11,7 @@ Built with Python 3 standard library only — no pip installs, no frameworks, no
 - **Scan Management** — List active scans, kill/pause/unpause/stop/continue, view progress and ETA
 - **Quarantine** — View quarantined files, restore individual files, bulk operations
 - **Reports** — View all scan reports, JSON reports, hook scan activity, email reports
-- **Schedules** — Each schedule's View Reports lists only scans tagged when its cron job ran; older untagged scans and manual scans of the same path remain in Reports
+- **Schedules** — GUI-managed entries in `/etc/cron.d/maldet-gui-schedules` missing from `gui.schedules.json` are recovered by ID and saved to the JSON list. Existing JSON entries take precedence; unrelated cron entries are preserved. Each schedule's View Reports lists only scans tagged when its cron job ran; older untagged scans and manual scans of the same path remain in Reports
 - **Monitoring** — Start/stop/reload inotify monitor, view monitor configuration
 - **Updates** — Update signatures, update maldet version (stable/beta channel)
 - **Configuration** — Full conf.maldet editor with sections, toggles, and text inputs
@@ -23,6 +23,12 @@ Built with Python 3 standard library only — no pip installs, no frameworks, no
 - **Languages** — English and Brazilian Portuguese selectable in the top bar, persisted in the browser
 
 ## Requirements
+
+The universal installer installs the bundled three scheduled scans on new
+installations **and upgrades**, replacing the existing GUI cron and JSON schedule
+list. Changed schedules are backed up under `/var/backups/maldet-gui-schedules.*`
+before replacement. The defaults include scans of `/` and `/home/status`; edit or
+disable them in Agendamentos if they do not suit this host.
 
 - Python 3.6+
 - Linux Malware Detect (maldet) installed

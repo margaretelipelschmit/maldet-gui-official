@@ -1,0 +1,5 @@
+# Managed by Maldet GUI (Agendamentos) - do not edit manually.
+# This file is regenerated automatically whenever schedules change.
+0 3 * * * root MALDET_GUI_SCHEDULE_ID=sch_1790710984_d3cd59 /usr/local/maldetect/maldet -b -a / >> /dev/null 2>&1  # gui-schedule:sch_1790710984_d3cd59 Daily /
+0 3 * * 0 root MALDET_GUI_SCHEDULE_ID=sch_1790711002_33afd5 /usr/local/maldetect/maldet -b -a / >> /dev/null 2>&1  # gui-schedule:sch_1790711002_33afd5 Weekly /
+45 16 * * * root MALDET_GUI_SCHEDULE_ID=sch_1790711071_919e96 /usr/local/maldetect/maldet -b -r /home/status 1 >> /dev/null 2>&1  # gui-schedule:sch_1790711071_919e96 Tesrt
