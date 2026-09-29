@@ -27,6 +27,13 @@ sudo bash install.sh
 O instalador identifica a distribuição, verifica dependências e instala o
 Maldet, a GUI e os launchers:
 
+Durante a instalação, cada etapa mostra `[running]`, `[ok]` ou `[failed]`,
+incluindo o tempo gasto e o código de saída em caso de falha. Ao final,
+**Process status** mostra o estado e PID dos serviços `maldet` e `maldet-gui`
+(quando instalados); um monitor desativado aparece como inativo, não como
+erro de instalação. O relatório não exibe argumentos nem a lista de processos
+de outros aplicativos do servidor.
+
 | Componente | Caminho |
 |---|---|
 | Servidor da GUI | `/usr/local/maldetect/gui/maldet_gui.py` |
