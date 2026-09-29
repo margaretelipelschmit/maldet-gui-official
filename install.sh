@@ -6,7 +6,15 @@
 #             (C) 2026, Ryan MacDonald <ryan@rfxn.com>
 # This program may be freely redistributed under the terms of the GNU GPL v2
 ##
+##
+# Linux Malware Detect (WebGUI - maldet-gui v1.0.0)
+#             (C) 2011-2026, bithostel <hostmaster@bithostel.com.br>
+#             (C) 2026, Fabio Schmit <https://bithostel.com.br>
+# This program may be freely redistributed under the terms of the GNU GPL v2
+#                      Universal Linux Server Setup v1.0.0
+##
 #
+
 PATH=$PATH:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 lmd_version="2.0.1"
 inspath=/usr/local/maldetect
