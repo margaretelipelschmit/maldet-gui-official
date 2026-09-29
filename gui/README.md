@@ -11,6 +11,7 @@ Built with Python 3 standard library only — no pip installs, no frameworks, no
 - **Scan Management** — List active scans, kill/pause/unpause/stop/continue, view progress and ETA
 - **Quarantine** — View quarantined files, restore individual files, bulk operations
 - **Reports** — View all scan reports, JSON reports, hook scan activity, email reports
+- **Schedules** — Each schedule's View Reports lists only scans tagged when its cron job ran; older untagged scans and manual scans of the same path remain in Reports
 - **Monitoring** — Start/stop/reload inotify monitor, view monitor configuration
 - **Updates** — Update signatures, update maldet version (stable/beta channel)
 - **Configuration** — Full conf.maldet editor with sections, toggles, and text inputs
@@ -45,7 +46,7 @@ chmod +x launch.sh
 ### Quick Start
 
 ```bash
-# Start the GUI (binds to localhost:32501 by default)
+# Start the GUI (binds to localhost:8080 by default)
 ./launch.sh
 
 # Start the server in the background and open the browser
@@ -55,10 +56,10 @@ chmod +x launch.sh
 python3 maldet_gui.py
 ```
 
-Then open your browser to: **http://127.0.0.1:32501**
+Then open your browser to: **http://127.0.0.1:8080**
 
 When installed as `maldet-gui.service`, the service listens on all VPS
-interfaces at port 32501. Remote access uses **http://SERVER_ADDRESS:32501**.
+interfaces at port 8080. Remote access uses **http://SERVER_ADDRESS:8080**.
 The GUI is HTTP-only; use a reverse proxy such as nginx or Caddy for HTTPS.
 
 ### System tray
@@ -77,7 +78,7 @@ exits with an actionable message when `yad` or a graphical session is absent.
 Environment variables:
 
 ```
-MALDET_GUI_URL=http://127.0.0.1:32501
+MALDET_GUI_URL=http://127.0.0.1:8080
 MALDET_SYSTRAY_INTERVAL=5
 MALDET_SYSTRAY_START_GUI=1
 ```
@@ -89,7 +90,7 @@ python3 maldet_gui.py [OPTIONS]
 
 Options:
   --host HOST        Bind address (default: 127.0.0.1)
-  --port PORT        Port number (default: 32501)
+  --port PORT        Port number (default: 8080)
   --base-dir PATH    Maldet installation directory (default: /usr/local/maldetect)
   --maldet-bin PATH  Path to maldet binary (default: auto-detect)
 ```
@@ -101,7 +102,7 @@ Options:
 python3 maldet_gui.py --port 9090
 
 # Run on all interfaces (for remote access)
-python3 maldet_gui.py --host 0.0.0.0 --port 32501
+python3 maldet_gui.py --host 0.0.0.0 --port 8080
 
 # Specify custom maldet installation
 python3 maldet_gui.py --base-dir /opt/maldet --maldet-bin /usr/local/sbin/maldet
@@ -110,9 +111,9 @@ python3 maldet_gui.py --base-dir /opt/maldet --maldet-bin /usr/local/sbin/maldet
 ## Security Notes
 
 - The manual launcher binds to `127.0.0.1` by default (localhost only)
-- The installed systemd service binds to `0.0.0.0:32501` for VPS access
+- The installed systemd service binds to `0.0.0.0:8080` for VPS access
 - For remote access, use `--host 0.0.0.0` and ensure proper firewall rules
-- Do not use `https://SERVER_ADDRESS:32501` unless TLS is configured by a reverse proxy
+- Do not use `https://SERVER_ADDRESS:8080` unless TLS is configured by a reverse proxy
 - The GUI executes maldet commands with the privileges of the running user
 - For production use, consider running behind a reverse proxy with authentication
 - All maldet operations require appropriate permissions (root for most operations)

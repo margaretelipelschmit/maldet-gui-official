@@ -4,11 +4,17 @@
 #
 set -euo pipefail
 
-URL="${MALDET_GUI_URL:-http://127.0.0.1:${MALDET_GUI_PORT:-32501}}"
+# Same port as the installed WebGUI service (/etc/default/maldet-gui), when
+# readable; otherwise the service default 8080.
+if [ -z "${MALDET_GUI_PORT:-}" ] && [ -r /etc/default/maldet-gui ]; then
+	MALDET_GUI_PORT=$(sed -n 's/^MALDET_GUI_PORT=["'\'']\{0,1\}\([0-9]*\).*/\1/p' /etc/default/maldet-gui | tail -n1)
+fi
+URL="${MALDET_GUI_URL:-http://127.0.0.1:${MALDET_GUI_PORT:-8080}}"
 INTERVAL="${MALDET_SYSTRAY_INTERVAL:-5}"
 START_GUI="${MALDET_SYSTRAY_START_GUI:-1}"
 GUI_LAUNCHER="${MALDET_GUI_LAUNCHER:-/usr/local/sbin/maldet-gui}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve the /usr/local/sbin/maldet-systray symlink to the real gui/ dir.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 GUI_LOG="${MALDET_SYSTRAY_LOG:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/maldet/gui.log}"
 
 case "$INTERVAL" in
@@ -45,7 +51,8 @@ fi
 
 GUI_START_EPOCH=0
 gui_healthy() {
-	python3 - "$URL/api/check" <<'PY' >/dev/null 2>&1
+	# /api/check requires a login (401); /api/auth/status is public.
+	python3 - "$URL/api/auth/status" <<'PY' >/dev/null 2>&1
 import sys
 from urllib.request import urlopen
 with urlopen(sys.argv[1], timeout=2) as response:
@@ -62,7 +69,7 @@ ensure_gui() {
 	[ $((now - GUI_START_EPOCH)) -ge 15 ] || return 1
 	GUI_START_EPOCH="$now"
 	mkdir -p "$(dirname "$GUI_LOG")" 2>/dev/null || true
-	printf '%s\n' "Starting WebGUI because $URL/api/check is unavailable" >>"$GUI_LOG"
+	printf '%s\n' "Starting WebGUI because $URL is unavailable" >>"$GUI_LOG"
 	nohup "$GUI_LAUNCHER" >>"$GUI_LOG" 2>&1 </dev/null &
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		sleep 1
@@ -113,7 +120,7 @@ coproc YAD_PROCESS {
 		--image=security-high \
 		--text="Maldet" \
 		--command="$0 --open '$URL'" \
-		--menu="Open Web GUI!$0 --open '$URL'|Quit!$0 --quit"
+		--menu="Open Web GUI!$0 --open '$URL'|Quit!quit"
 }
 YAD_PID="$YAD_PROCESS_PID"
 

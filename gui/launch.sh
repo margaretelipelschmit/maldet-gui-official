@@ -5,12 +5,13 @@
 #
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve the /usr/local/sbin/maldet-gui symlink so maldet_gui.py is found.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Default settings
 HOST="${MALDET_GUI_HOST:-127.0.0.1}"
-PORT="${MALDET_GUI_PORT:-32501}"
+PORT="${MALDET_GUI_PORT:-8080}"
 MALDET_BIN="${MALDET_BIN:-maldet}"
 BASE_DIR="${MALDET_BASE_DIR:-/usr/local/maldetect}"
 
@@ -26,7 +27,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --host HOST        Bind address (default: 127.0.0.1)"
-            echo "  --port PORT        Port number (default: 32501)"
+            echo "  --port PORT        Port number (default: 8080)"
             echo "  --base-dir PATH    Maldet installation directory"
             echo "  --maldet-bin PATH  Path to maldet binary"
             echo "  --help, -h         Show this help message"
