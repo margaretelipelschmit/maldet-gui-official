@@ -11,6 +11,7 @@ Built with Python 3 standard library only — no pip installs, no frameworks, no
 - **Scan Management** — List active scans, kill/pause/unpause/stop/continue, view progress and ETA
 - **Quarantine** — View quarantined files, restore individual files, bulk operations
 - **Reports** — View all scan reports, JSON reports, hook scan activity, email reports
+- **Schedules** — Each schedule's View Reports lists only scans tagged when its cron job ran; older untagged scans and manual scans of the same path remain in Reports
 - **Monitoring** — Start/stop/reload inotify monitor, view monitor configuration
 - **Updates** — Update signatures, update maldet version (stable/beta channel)
 - **Configuration** — Full conf.maldet editor with sections, toggles, and text inputs

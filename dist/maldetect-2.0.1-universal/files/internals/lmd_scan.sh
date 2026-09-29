@@ -888,6 +888,15 @@ _hook_escalate_check() {
 	fi
 }
 
+_scan_record_gui_schedule() {
+	# A path match is not proof that a scan was started by this schedule.
+	[[ "${MALDET_GUI_SCHEDULE_ID:-}" =~ ^sch_[0-9]+_[a-f0-9]{6}$ ]] || return 0
+	if ! printf '%s\n' "$MALDET_GUI_SCHEDULE_ID" > "$sessdir/gui.schedule.$scanid"; then
+		eout "{scan} failed to record GUI schedule for $scanid" 1
+		return 1
+	fi
+}
+
 scan() {
 	# Each scan, including background scans launched from one shell, gets its
 	# own namespace so cleanup and worker artifacts cannot cross-contaminate.
@@ -1050,6 +1059,10 @@ scan() {
 	fi
 	progress_cleaned=0
 	_in_scan_context=1
+	if ! _scan_record_gui_schedule; then
+		_scan_cleanup
+		return 1
+	fi
 	_lmd_elog_event "$ELOG_EVT_SCAN_STARTED" "info" "scan started on $hrspath" "path=$hrspath" "mode=${svc:-a}" ${hscan:+"source=hook"}
 
 	# Write lifecycle meta (non-hook scans only)

@@ -25,6 +25,7 @@ import pwd
 import hashlib
 import secrets
 import tempfile
+import shlex
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -814,7 +815,7 @@ def _validate_cron_expr(expr):
 def build_schedule_cron_line(schedule):
     """Build a single crontab line (5-field timing + command) for a schedule."""
     maldet_bin = os.path.join(get_base_dir(), "maldet")
-    path = schedule.get("path", "")
+    path = shlex.quote(schedule.get("path", ""))
     if schedule.get("scan_type") == "recent":
         cmd_args = "-b -r %s %s" % (path, schedule.get("days", 1))
     else:
@@ -827,8 +828,10 @@ def build_schedule_cron_line(schedule):
             int(schedule.get("minute", 0)), int(schedule.get("hour", 3)), int(schedule.get("weekday", 0)))
     else:
         timing = "%d %d * * *" % (int(schedule.get("minute", 0)), int(schedule.get("hour", 3)))
-    line = "%s root %s %s >> /dev/null 2>&1  # gui-schedule:%s %s" % (
-        timing, maldet_bin, cmd_args, schedule.get("id", ""), schedule.get("name", ""))
+    schedule_id = schedule.get("id", "")
+    line = "%s root MALDET_GUI_SCHEDULE_ID=%s %s %s >> /dev/null 2>&1  # gui-schedule:%s %s" % (
+        timing, shlex.quote(schedule_id), shlex.quote(maldet_bin),
+        cmd_args, schedule_id, schedule.get("name", ""))
     if not schedule.get("enabled", True):
         line = "# [disabled] " + line
     return line
@@ -1418,7 +1421,7 @@ class MaldetAPI:
 
     @staticmethod
     def _schedule_reports(schedule_id):
-        """Return the most recent scan reports whose path matches a schedule."""
+        """Return reports explicitly attributed to this scheduled scan."""
         schedules = load_schedules()
         schedule = next((s for s in schedules if s.get("id") == schedule_id), None)
         if not schedule:
@@ -1427,11 +1430,23 @@ class MaldetAPI:
             data = safe_json_list()
         except Exception as exc:
             return 503, {"error": "Unable to load scan reports: " + str(exc)}
-        target = os.path.realpath(schedule.get("path", ""))
-        reports = [
-            r for r in data.get("reports", [])
-            if isinstance(r, dict) and os.path.realpath(str(r.get("path", ""))) == target
-        ]
+        reports = []
+        for report in data.get("reports", []):
+            if not isinstance(report, dict):
+                continue
+            scan_id = str(report.get("scan_id", ""))
+            if not re.fullmatch(r"[0-9]{6}-[0-9]{4}\.[0-9]+", scan_id):
+                continue
+            marker = os.path.join(get_session_dir(), "gui.schedule." + scan_id)
+            try:
+                with open(marker, encoding="utf-8") as fh:
+                    owner = fh.read().strip()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                return 503, {"error": "Unable to read schedule attribution: " + str(exc)}
+            if owner == schedule_id:
+                reports.append(report)
         reports.sort(key=lambda r: r.get("started_epoch", 0), reverse=True)
         return 200, {"schedule": schedule, "reports": reports[:20]}
 
@@ -2347,6 +2362,15 @@ def main():
     args = parse_args()
     BASE_DIR = args.base_dir
     MALDET_BIN = args.maldet_bin
+
+    # Upgrade existing cron entries so scheduled runs carry provenance, too.
+    if os.path.isfile(get_schedules_path()):
+        schedules = load_schedules()
+        if schedules:
+            ok, error = write_managed_cron_file(schedules)
+            if not ok:
+                print("Could not update scheduled scan cron entries: " + error,
+                      file=sys.stderr)
 
     print("Maldet GUI v%s" % VERSION)
     print("  Server:        http://%s:%d" % (args.host, args.port))
