@@ -382,6 +382,23 @@
             'Resuming...': 'Retomando...', 'Discarding...': 'Descartando...',
             'Resource Usage': 'Uso de recursos', 'RAM': 'RAM',
             'Waiting for data...': 'Aguardando dados...', 'Live': 'Ao vivo',
+            'Host overview': 'Visão geral do host', 'System resources': 'Recursos do sistema',
+            'Disk': 'Disco', 'Unavailable': 'Indisponível', 'used': 'usados',
+            'free': 'livres', 'available': 'disponíveis', 'of': 'de',
+            'Host and runtime': 'Host e ambiente', 'Hostname': 'Nome do host',
+            'Operating system': 'Sistema operacional', 'Architecture': 'Arquitetura',
+            'Processor': 'Processador', 'Python version': 'Versão do Python',
+            'CPU cores': 'Núcleos de CPU', 'Install path': 'Caminho de instalação',
+            'Log directory': 'Diretório de logs', 'Maldet binary': 'Binário do Maldet',
+            'ClamAV': 'ClamAV', 'Available': 'Disponível', 'Missing': 'Ausente',
+            'Found': 'Encontrado', 'No binaries reported': 'Nenhum binário informado',
+            'Installer path': 'Caminho do instalador', 'GUI privileges': 'Privilégios da GUI',
+            'Root': 'Root', 'Unprivileged': 'Sem privilégios',
+            'Installer directory': 'Diretório do instalador',
+            'Effective UID': 'UID efetivo', 'Monitor PIDs': 'PIDs do monitor',
+            'Reboot system': 'Reiniciar sistema', 'Reboot': 'Reiniciar',
+            'Reboot the entire server in one minute? Active scans and connections will be interrupted.':
+                'Reiniciar todo o servidor em um minuto? Scans ativos e conexões serão interrompidos.',
             'No detections in this scan': 'Nenhuma detecção neste scan',
             'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
@@ -619,6 +636,20 @@
             if (settingsBtn) {
                 settingsBtn.addEventListener('click', function() {
                     self.navigate('config');
+                });
+            }
+            var rebootBtn = document.getElementById('system-reboot-btn');
+            if (rebootBtn) {
+                rebootBtn.addEventListener('click', function() {
+                    if (!confirm(tr('Reboot the entire server in one minute? Active scans and connections will be interrupted.'))) return;
+                    rebootBtn.disabled = true;
+                    API.post('/system/reboot', {}).then(function(data) {
+                        rebootBtn.disabled = false;
+                        toast(data.message, 'warning', 12000);
+                    }).catch(function(e) {
+                        rebootBtn.disabled = false;
+                        toast('Error: ' + e.message, 'error');
+                    });
                 });
             }
             document.addEventListener('input', markPageDirty, true);
@@ -2532,16 +2563,92 @@
     }
 
     // ----- System Info -----
-    function renderSystemInfo() {
-        return API.get('/system').then(function(data) {
-            var sys = data.system;
-            var h = '<div class="card"><div class="card-header"><span class="card-title">System Info</span></div><table>';
-            for (var key in sys) {
-                if (key === 'binaries' || key === 'active_scans') continue;
-                h += '<tr><th>' + escapeHtml(key) + '</th><td>' + escapeHtml(String(sys[key])) + '</td></tr>';
-            }
+    function systemMetric(label, percent, detail) {
+        var valid = typeof percent === 'number' && isFinite(percent);
+        var value = valid ? Math.max(0, Math.min(100, percent)) : null;
+        var level = value === null ? '' : value >= 85 ? ' danger' : value >= 60 ? ' warning' : '';
+        var display = value === null ? tr('Unavailable') : Math.round(value) + '%';
+        return '<div class="system-metric card"><div class="system-metric-heading"><span>' +
+            escapeHtml(label) + '</span><strong>' + escapeHtml(display) + '</strong></div>' +
+            '<div class="system-meter' + level + '" role="progressbar" aria-label="' + escapeHtml(label) +
+            '" aria-valuemin="0" aria-valuemax="100"' +
+            (value === null ? '' : ' aria-valuenow="' + Math.round(value) + '"') +
+            '><div class="system-meter-fill" style="width:' + (value === null ? 0 : value) + '%"></div></div>' +
+            '<div class="system-metric-detail">' + escapeHtml(detail) + '</div></div>';
+    }
 
-            h += '</table></div>';
+    function systemDetail(label, value) {
+        return '<div class="system-detail"><dt>' + tr(label) + '</dt><dd>' +
+            escapeHtml(value === null || value === undefined || value === '' ? tr('Unavailable') : String(value)) +
+            '</dd></div>';
+    }
+
+    function renderSystemInfo() {
+        return Promise.all([API.get('/system'), API.get('/system/usage').catch(function() {
+            return null;
+        })]).then(function(results) {
+            var sys = results[0].system, usage = results[1];
+            var memTotal = usage && usage.mem_total_mb > 0 ? usage.mem_total_mb : sys.mem_total_mb;
+            var memAvailable = usage && usage.mem_total_mb > 0 ? usage.mem_available_mb : sys.mem_available_mb;
+            var memValid = typeof memTotal === 'number' && memTotal > 0 &&
+                typeof memAvailable === 'number' && memAvailable >= 0;
+            var diskValid = typeof sys.disk_total_gb === 'number' && sys.disk_total_gb > 0 &&
+                typeof sys.disk_free_gb === 'number' && sys.disk_free_gb >= 0;
+            var memUsed = memValid ? Math.max(0, memTotal - memAvailable) : 0;
+            var diskUsed = diskValid ? Math.max(0, sys.disk_total_gb - sys.disk_free_gb) : 0;
+            var h = '<div class="system-page"><div class="card system-hero">' +
+                '<div><span class="system-eyebrow">' + tr('Host overview') + '</span><h2>' +
+                escapeHtml(sys.hostname || tr('Unavailable')) + '</h2><p>' +
+                escapeHtml([sys.system, sys.release, sys.machine].filter(Boolean).join(' ') || tr('Unavailable')) +
+                '</p></div><div class="system-health">' +
+                '<span class="system-health-item ' + (sys.monitor_running ? 'is-online' : 'is-offline') + '">' +
+                tr('Monitor') + ': ' + tr(sys.monitor_running ? 'ONLINE' : 'OFFLINE') + '</span>' +
+                '<span class="system-health-item">' + tr('Active Scans') + ': ' +
+                (Array.isArray(sys.active_scans) ? sys.active_scans.length : 0) + '</span></div></div>';
+            h += '<h3 class="system-section-title">' + tr('System resources') + '</h3><div class="system-metrics">';
+            h += systemMetric(tr('CPU'), usage && usage.cpu_percent,
+                sys.cpu || tr('Unavailable'));
+            h += systemMetric(tr('RAM'), memValid ? memUsed / memTotal * 100 : null,
+                memValid ? formatMb(memUsed) + ' ' + tr('used') + ' ' + tr('of') + ' ' + formatMb(memTotal) +
+                    ' · ' + formatMb(memAvailable) + ' ' + tr('available') : tr('Unavailable'));
+            h += systemMetric(tr('Disk'), diskValid ? diskUsed / sys.disk_total_gb * 100 : null,
+                diskValid ? diskUsed.toFixed(1) + ' GB ' + tr('used') + ' ' + tr('of') + ' ' +
+                    sys.disk_total_gb + ' GB · ' + sys.disk_free_gb + ' GB ' + tr('free') : tr('Unavailable'));
+            h += '</div><div class="system-panels"><div class="card"><div class="card-header"><span class="card-title">' +
+                tr('Host and runtime') + '</span></div><dl class="system-details">';
+            h += systemDetail('Hostname', sys.hostname);
+            h += systemDetail('Operating system', [sys.system, sys.release].filter(Boolean).join(' '));
+            h += systemDetail('Architecture', sys.machine);
+            h += systemDetail('Processor', sys.cpu || sys.processor);
+            h += systemDetail('CPU cores', sys.cpu_cores);
+            h += systemDetail('Python version', sys.python_version);
+            h += '</dl></div><div class="card"><div class="card-header"><span class="card-title">' +
+                tr('System Information') + '</span></div><dl class="system-details">';
+            h += systemDetail('Maldet Version', sys.version);
+            h += systemDetail('Signature Set', sys.signature_version);
+            h += systemDetail('ClamAV', (sys.clamav_version || tr('Unavailable')) +
+                ' (' + (sys.clamav_status || tr('Unavailable')) + ')');
+            h += systemDetail('Install path', sys.base_dir);
+            h += systemDetail('Log directory', sys.log_dir);
+            h += systemDetail('Maldet binary', sys.maldet_path);
+            h += systemDetail('Installer path', sys.installer_path);
+            h += systemDetail('Installer directory', sys.installer_directory);
+            h += systemDetail('GUI privileges', sys.is_root ? tr('Root') : tr('Unprivileged'));
+            h += systemDetail('Effective UID', sys.euid);
+            h += systemDetail('Monitor PIDs', (sys.monitor_pids || []).join(', '));
+            h += '</dl></div></div><div class="card"><div class="card-header"><span class="card-title">' +
+                tr('Binary Detection') + '</span></div><div class="system-binaries">';
+            var binaries = sys.binaries || {};
+            var names = Object.keys(binaries).sort();
+            if (!names.length) h += '<p class="form-help">' + tr('No binaries reported') + '</p>';
+            names.forEach(function(name) {
+                var path = binaries[name];
+                h += '<div class="system-binary"><div><strong>' + escapeHtml(name) +
+                    '</strong><span>' + escapeHtml(path || tr('not found')) + '</span></div>' +
+                    '<span class="badge ' + (path ? 'bg-success' : 'bg-danger') + '">' +
+                    tr(path ? 'Found' : 'Missing') + '</span></div>';
+            });
+            h += '</div></div></div>';
             return h;
         });
     }
