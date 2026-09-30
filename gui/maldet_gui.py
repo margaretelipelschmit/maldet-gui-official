@@ -1158,6 +1158,26 @@ class MaldetAPI:
         if route == "/api/system/usage" and method == "GET":
             return 200, get_resource_usage()
 
+        if "/api/system/reboot" in route:
+            if method != "POST":
+                return 405, {"error": "Method not allowed"}
+            if os.geteuid() != 0:
+                return 403, {"error": "Reboot requires the WebGUI to run as root"}
+            shutdown = shutil.which("shutdown")
+            if not shutdown:
+                return 503, {"error": "shutdown command is not available"}
+            try:
+                result = subprocess.run(
+                    [shutdown, "-r", "+1", "Maldet GUI requested a system reboot"],
+                    capture_output=True, text=True, timeout=10)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return 503, {"error": "Could not schedule reboot: " + str(exc)}
+            if result.returncode != 0:
+                return 503, {"error": "Could not schedule reboot: " +
+                        (result.stderr.strip() or result.stdout.strip() or
+                         "shutdown exited with status %d" % result.returncode)}
+            return 200, {"message": "System reboot scheduled in one minute"}
+
         if route == "/api/version":
             info = get_system_info()
             return 200, {
