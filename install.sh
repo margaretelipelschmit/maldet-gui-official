@@ -14,6 +14,7 @@
 #                      Universal Linux Server Setup v1.0.0
 ##
 #
+
 PATH=$PATH:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 lmd_version="2.0.1"
 inspath=/usr/local/maldetect
