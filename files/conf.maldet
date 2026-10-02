@@ -164,8 +164,8 @@ sig_import_csig_url=""
 scan_hashtype="auto"
 
 # Number of parallel workers for native scan passes (MD5, SHA-256, HEX, and CSIG).
-# Auto detection always uses half of the CPU cores (min 1, max 8) so the
-# native engine never saturates the whole host by default.
+# Auto detection uses one worker to minimize native scan CPU contention.
+# The default 25% per-worker CPU cap further limits its CPU use.
 # [ auto = default, 1 = single-threaded, max = 8 ]
 scan_workers="auto"
 
@@ -262,13 +262,15 @@ scan_cpunice="19"
 # [ 0 = most favorable IO, 7 = least favorable IO ]
 scan_ionice="6"
 
-# Set hard limit on CPU usage for find and clam(d)scan CLIENT processes. This
-# requires the 'cpulimit' binary to be available on the server. The values
+# Set hard limit on CPU usage per native scan worker and find/clam(d)scan
+# CLIENT process. Requires the 'cpulimit' binary to be available. The values
 # are expressed as relative percentage * N cores on system. An 8 CPU core
 # server would accept values from 0 - 800, 12 cores 0 - 1200 etc...
+# The default 50% cap limits each native scan worker to half of a CPU core,
+# balancing scan progress with CPU availability for other services.
 # Note: this does NOT limit the clamd daemon itself — see scan_clamd_cpulimit
 # below for that.
-scan_cpulimit="0"
+scan_cpulimit="50"
 
 # Hard cap (percentage of one core) applied to the shared clamd DAEMON while
 # a maldet scan using the clamav/clamdscan engine is running, then restored

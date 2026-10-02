@@ -68,9 +68,31 @@ _hash_batch_worker() {
 			_lifecycle_check_parent "${_scan_pid:-$$}" || exit 5  # orphaned
 		fi
 	else
-		# Linux: xargs hashcmd hashes all files in one process
+		# Linux: batch xargs calls so progress can be reported while hashes run.
 		_hash_out=$(mktemp "$tmpdir/.${_hash_label}_linux.$$.XXXXXX")
-		xargs -d '\n' "$_hashcmd" < "$_chunk" > "$_hash_out" 2>/dev/null  # suppress errors on unreadable files
+		if ! (
+			set -o pipefail
+			xargs -d '\n' -n 500 "$_hashcmd" < "$_chunk" 2>/dev/null |
+				awk -v pfile="$_progress_file" '
+				{
+					print
+					count++
+					if (pfile != "" && count % 500 == 0) {
+						print count > pfile
+						close(pfile)
+					}
+				}
+				END {
+					if (pfile != "" && count > 0) {
+						print count > pfile
+						close(pfile)
+					}
+				}
+				'
+		) > "$_hash_out"; then
+			command rm -f "$_hash_out"
+			return 1
+		fi
 		# awk join: load sigs (hash->signame), scan hash output for matches
 		# Output format: "hash  filepath" (two spaces)
 		# Writes progress every 500 files when progress file is set.

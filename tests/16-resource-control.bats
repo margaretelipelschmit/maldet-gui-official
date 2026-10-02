@@ -495,7 +495,7 @@ _spawn_mock_clamd() {
     wait "$scan_pid" 2>/dev/null
 }
 
-@test "_resolve_worker_count auto-detection always uses half of the CPU cores, not double" {
+@test "_resolve_worker_count auto-detection uses one native scan worker" {
     set +eu
     trap - ERR
     source "$LMD_INSTALL/internals/internals.conf"
@@ -505,7 +505,7 @@ _spawn_mock_clamd() {
 
     nproc() { echo "8"; }
     run _resolve_worker_count 999999
-    assert_output "4"
+    assert_output "1"
 }
 
 @test "_resolve_worker_count auto-detection never goes below 1 worker on single-core hosts" {
@@ -521,7 +521,7 @@ _spawn_mock_clamd() {
     assert_output "1"
 }
 
-@test "_resolve_worker_count auto-detection caps half-of-cores at 8 on large hosts" {
+@test "_resolve_worker_count auto-detection stays at one on large hosts" {
     set +eu
     trap - ERR
     source "$LMD_INSTALL/internals/internals.conf"
@@ -531,5 +531,57 @@ _spawn_mock_clamd() {
 
     nproc() { echo "64"; }
     run _resolve_worker_count 999999
-    assert_output "8"
+    assert_output "1"
+}
+
+@test "_resolve_worker_count honors an explicitly configured worker count" {
+    set +eu
+    trap - ERR
+    source "$LMD_INSTALL/internals/internals.conf"
+    source "$LMD_INSTALL/conf.maldet"
+    source "$LMD_INSTALL/internals/lmd_scan.sh"
+    scan_workers=4
+
+    run _resolve_worker_count 999999
+    assert_output "4"
+}
+
+@test "default native scan CPU limit is 50 percent per worker" {
+    run grep '^scan_cpulimit="50"$' "$LMD_INSTALL/conf.maldet"
+    assert_success
+}
+
+@test "_hash_batch_worker reports progress before the full single-worker batch finishes" {
+    set +eu
+    trap - ERR
+    source "$LMD_INSTALL/internals/lmd_engine.sh"
+    tmpdir=$(mktemp -d)
+    local chunk="$tmpdir/chunk" mock_hash="$tmpdir/mock-hash" progress="$tmpdir/progress"
+    local sigfile="$tmpdir/signatures" i worker_pid
+    : > "$sigfile"
+    for ((i = 1; i <= 2000; i++)); do
+        printf 'file-%s\n' "$i" >> "$chunk"
+    done
+    cat > "$mock_hash" <<'EOF'
+#!/usr/bin/env bash
+for file do
+    printf '%032d  %s\n' 0 "$file"
+    sleep 0.002
+done
+EOF
+    chmod +x "$mock_hash"
+
+    _hash_batch_worker "$mock_hash" md5 "$chunk" "$sigfile" "$progress" \
+        > "$tmpdir/results" &
+    worker_pid=$!
+    local attempts=0
+    while [ ! -s "$progress" ] && kill -0 "$worker_pid" 2>/dev/null && [ "$attempts" -lt 500 ]; do
+        sleep 0.02
+        attempts=$((attempts + 1))
+    done
+    [ -s "$progress" ]
+    [ "$(cat "$progress")" -lt 2000 ]
+    wait "$worker_pid"
+    [ "$(cat "$progress")" = "2000" ]
+    rm -rf "$tmpdir"
 }

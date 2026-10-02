@@ -222,6 +222,7 @@ prerun() {
 
 	scan_cpunice="${scan_cpunice:-19}"
 	scan_ionice="${scan_ionice:-6}"
+	scan_cpulimit="${scan_cpulimit:-50}"
 	: "${session_legacy_compat:=auto}"
 
 	_build_nice_command "$scan_cpunice" "$scan_ionice" "$scan_cpulimit"
