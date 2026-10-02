@@ -13,6 +13,11 @@
 [[ -n "${_LMD_MONITOR_LOADED:-}" ]] && return 0 2>/dev/null
 _LMD_MONITOR_LOADED=1
 
+_monitor_user_webroots_only() {
+	[[ "${inopt:-}" =~ ^[Uu][Ss][Ee][Rr][Ss]?$ ]] &&
+		[ "${inotify_docroot:-}" = "public_html,htdocs" ]
+}
+
 _monitor_parse_interval() {
 	# Parse a digest_interval value (Nh, Nm, Nd, 0) into seconds.
 	# Prints seconds to stdout. Returns 1 on invalid input.
@@ -326,7 +331,7 @@ webserver_detect_report() {
 	fi
 	echo ""
 	echo "inotify_docroot_autodetect=\"${inotify_docroot_autodetect:-0}\""
-	if [ "${inotify_docroot_autodetect:-0}" = "1" ]; then
+	if [ "${inotify_docroot_autodetect:-0}" = "1" ] && ! _monitor_user_webroots_only; then
 		echo 'detected document roots are added to `maldet --monitor users`'
 	else
 		echo 'hint: set inotify_docroot_autodetect="1" in conf.maldet to monitor detected document roots'
@@ -821,15 +826,15 @@ monitor_init() {
 			fi
 		fi
 
-		if [ -d "/dev/shm" ]; then
+		if ! _monitor_user_webroots_only && [ -d "/dev/shm" ]; then
 			echo "/dev/shm" >> "$_inotify_fpaths"
 			eout "{mon} added /dev/shm to inotify monitoring array" 1
 		fi
-		if [ -d "/var/tmp" ]; then
+		if ! _monitor_user_webroots_only && [ -d "/var/tmp" ]; then
 			echo "/var/tmp" >> "$_inotify_fpaths"
 			eout "{mon} added /var/tmp to inotify monitoring array" 1
 		fi
-		if [ -d "/tmp" ]; then
+		if ! _monitor_user_webroots_only && [ -d "/tmp" ]; then
 			echo "/tmp" >> "$_inotify_fpaths"
 			eout "{mon} added /tmp to inotify monitoring array" 1
 		fi
@@ -863,7 +868,9 @@ monitor_init() {
 	fi
 
 	# Additive path composition (defect: path model was either/or)
-	_monitor_append_extra_paths "${monitor_paths_extra:-}" "$_inotify_fpaths"
+	if ! _monitor_user_webroots_only; then
+		_monitor_append_extra_paths "${monitor_paths_extra:-}" "$_inotify_fpaths"
+	fi
 
 	# Build inotifywait --exclude regex — union ignore_inotify + defaults (issue #480)
 	# Per-entry semantic dispatch via _monitor_to_ere_entry (issue #484)

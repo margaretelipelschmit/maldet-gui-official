@@ -735,7 +735,8 @@ def parse_config(path=None):
 def write_config_change(path, key, value):
     """Update a single key=value in the config file."""
     try:
-        lines = open(path, "r", errors="replace").readlines()
+        with open(path, "r", errors="replace") as fh:
+            lines = fh.readlines()
         changed = False
         new_lines = []
         for line in lines:
@@ -748,7 +749,8 @@ def write_config_change(path, key, value):
                 new_lines.append(line)
         if not changed:
             return False, "Config key '%s' not found" % key
-        open(path, "w").writelines(new_lines)
+        with open(path, "w") as fh:
+            fh.writelines(new_lines)
         return True, "Config updated successfully"
     except Exception as e:
         return False, str(e)
@@ -783,17 +785,26 @@ def get_managed_cron_path():
 
 
 def load_schedules():
-    """Load the list of GUI-managed scheduled scans."""
+    """Load saved schedules and recover GUI-managed entries still in cron."""
     path = get_schedules_path()
-    if not os.path.isfile(path):
-        return []
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
+    schedules = []
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         schedules = data.get("schedules", []) if isinstance(data, dict) else data
-        return schedules if isinstance(schedules, list) else []
-    except (OSError, ValueError):
-        return []
+        if not isinstance(schedules, list) or any(
+                not isinstance(s, dict) or not s.get("id") for s in schedules):
+            raise ValueError("Invalid GUI schedules file")
+    known_ids = {s["id"] for s in schedules}
+    imported = False
+    for schedule in read_managed_cron_schedules():
+        if schedule["id"] not in known_ids:
+            schedules.append(schedule)
+            known_ids.add(schedule["id"])
+            imported = True
+    if imported:
+        save_schedules(schedules)
+    return schedules
 
 
 def save_schedules(schedules):
@@ -810,6 +821,86 @@ def save_schedules(schedules):
 def _validate_cron_expr(expr):
     parts = expr.split()
     return len(parts) == 5 and all(_CRON_FIELD_RE.match(p) for p in parts)
+
+
+_MANAGED_SCHEDULE_RE = re.compile(r"^sch_\d+_[a-f0-9]{6}$")
+
+
+def _parse_managed_cron_line(line):
+    """Read only cron entries emitted by build_schedule_cron_line."""
+    disabled = line.startswith("# [disabled] ")
+    if disabled:
+        line = line[len("# [disabled] "):]
+    command, marker, label = line.rstrip("\n").partition("  # gui-schedule:")
+    if not marker:
+        raise ValueError("Invalid GUI schedule marker in cron")
+    schedule_id, _, name = label.partition(" ")
+    if not _MANAGED_SCHEDULE_RE.fullmatch(schedule_id) or not name:
+        raise ValueError("Invalid GUI schedule marker in cron")
+    fields = command.split(None, 6)
+    if len(fields) != 7 or fields[5] != "root":
+        raise ValueError("Invalid cron entry for " + schedule_id)
+    timing = fields[:5]
+    if not _validate_cron_expr(" ".join(timing)):
+        raise ValueError("Invalid cron timing for " + schedule_id)
+    try:
+        args = shlex.split(fields[6])
+    except ValueError as exc:
+        raise ValueError("Invalid cron command for " + schedule_id) from exc
+    expected_binary = os.path.join(get_base_dir(), "maldet")
+    if args and args[0].startswith("MALDET_GUI_SCHEDULE_ID="):
+        if args.pop(0) != "MALDET_GUI_SCHEDULE_ID=" + schedule_id:
+            raise ValueError("Mismatched cron schedule ID: " + schedule_id)
+    if len(args) < 7 or args[0:2] != [expected_binary, "-b"] or \
+            args[-3:] != [">>", "/dev/null", "2>&1"]:
+        raise ValueError("Unsupported cron command for " + schedule_id)
+    scan_args = args[2:-3]
+    if len(scan_args) == 2 and scan_args[0] == "-a":
+        scan_type, path, days = "all", scan_args[1], 1
+    elif len(scan_args) == 3 and scan_args[0] == "-r" and \
+            scan_args[2].isdigit() and int(scan_args[2]) > 0:
+        scan_type, path, days = "recent", scan_args[1], int(scan_args[2])
+    else:
+        raise ValueError("Unsupported scan arguments for " + schedule_id)
+    if not os.path.isabs(path):
+        raise ValueError("Invalid scan path for " + schedule_id)
+    minute, hour, day, month, weekday = timing
+    if minute.isdigit() and hour.isdigit() and 0 <= int(minute) <= 59 and \
+            0 <= int(hour) <= 23 and day == month == "*":
+        if weekday == "*":
+            frequency = "daily"
+        elif weekday.isdigit() and 0 <= int(weekday) <= 6:
+            frequency = "weekly"
+        else:
+            frequency = "custom"
+    else:
+        frequency = "custom"
+    return {
+        "id": schedule_id, "name": name, "path": path, "scan_type": scan_type,
+        "days": days, "frequency": frequency,
+        "hour": int(hour) if hour.isdigit() else 3,
+        "minute": int(minute) if minute.isdigit() else 0,
+        "weekday": int(weekday) if weekday.isdigit() else 0,
+        "cron_expr": " ".join(timing) if frequency == "custom" else "",
+        "enabled": not disabled, "created_at": int(schedule_id.split("_")[1]),
+    }
+
+
+def read_managed_cron_schedules():
+    path = get_managed_cron_path()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        return []
+    schedules = []
+    for line in lines:
+        if "gui-schedule:" not in line:
+            continue
+        schedule = _parse_managed_cron_line(line)
+        if schedule:
+            schedules.append(schedule)
+    return schedules
 
 
 def build_schedule_cron_line(schedule):
@@ -840,15 +931,28 @@ def build_schedule_cron_line(schedule):
 def write_managed_cron_file(schedules):
     """Regenerate the GUI-managed cron.d file from the current schedule list."""
     try:
+        cron_path = get_managed_cron_path()
+        preserved = []
+        try:
+            with open(cron_path, encoding="utf-8") as fh:
+                for line in fh:
+                    if "gui-schedule:" in line:
+                        _parse_managed_cron_line(line)
+                    elif line.strip() and not line.startswith((
+                            "# Managed by Maldet GUI", "# This file is regenerated",
+                            "# No schedules configured yet.")):
+                        preserved.append(line)
+        except FileNotFoundError:
+            pass
         lines = [
             "# Managed by Maldet GUI (Agendamentos) - do not edit manually.\n",
             "# This file is regenerated automatically whenever schedules change.\n",
         ]
-        if not schedules:
+        if not schedules and not preserved:
             lines.append("# No schedules configured yet.\n")
         for schedule in schedules:
             lines.append(build_schedule_cron_line(schedule) + "\n")
-        cron_path = get_managed_cron_path()
+        lines.extend(preserved)
         os.makedirs(os.path.dirname(cron_path), exist_ok=True)
         tmp = cron_path + ".tmp.%d" % os.getpid()
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -856,7 +960,7 @@ def write_managed_cron_file(schedules):
         os.chmod(tmp, 0o644)
         os.replace(tmp, cron_path)
         return True, None
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return False, str(exc)
 
 
@@ -1187,6 +1291,9 @@ class MaldetAPI:
         if route == "/api/monitor/users":
             return MaldetAPI._monitor_users(method, body or {})
 
+        if route == "/api/monitor/scope":
+            return MaldetAPI._monitor_scope(method, body or {})
+
         if route == "/api/monitor/webserver":
             return MaldetAPI._monitor_webserver(method, body or {})
 
@@ -1311,27 +1418,26 @@ class MaldetAPI:
             return 200, {"hits": hits[-100:], "count": len(hits)}
 
         # ---- Scheduled scans (Agendamentos) ----
-        if route == "/api/schedules" and method == "GET":
-            return 200, {"schedules": load_schedules(), "cron_path": get_managed_cron_path()}
-
-        if route == "/api/schedules" and method == "POST":
-            return MaldetAPI._save_schedule(None, body or {})
-
-        if route == "/api/schedules/cron" and method == "GET":
-            return MaldetAPI._schedules_cron_files()
-
-        if route.startswith("/api/schedules/") and method == "GET":
-            parts = route.split("/")
-            if len(parts) == 5 and parts[4] == "reports":
-                return MaldetAPI._schedule_reports(parts[3])
-
-        if route.startswith("/api/schedules/") and method == "PUT":
-            schedule_id = route.split("/")[3]
-            return MaldetAPI._save_schedule(schedule_id, body or {})
-
-        if route.startswith("/api/schedules/") and method == "DELETE":
-            schedule_id = route.split("/")[3]
-            return MaldetAPI._delete_schedule(schedule_id)
+        if route.startswith("/api/schedules"):
+            try:
+                if route == "/api/schedules" and method == "GET":
+                    return 200, {"schedules": load_schedules(), "cron_path": get_managed_cron_path()}
+                if route == "/api/schedules" and method == "POST":
+                    return MaldetAPI._save_schedule(None, body or {})
+                if route == "/api/schedules/cron" and method == "GET":
+                    return MaldetAPI._schedules_cron_files()
+                if route.startswith("/api/schedules/") and method == "GET":
+                    parts = route.split("/")
+                    if len(parts) == 5 and parts[4] == "reports":
+                        return MaldetAPI._schedule_reports(parts[3])
+                if route.startswith("/api/schedules/") and method == "PUT":
+                    schedule_id = route.split("/")[3]
+                    return MaldetAPI._save_schedule(schedule_id, body or {})
+                if route.startswith("/api/schedules/") and method == "DELETE":
+                    schedule_id = route.split("/")[3]
+                    return MaldetAPI._delete_schedule(schedule_id)
+            except (OSError, ValueError) as exc:
+                return 500, {"error": "Could not read schedules: " + str(exc)}
 
         return 404, {"error": "Not found: " + method + " " + route}
 
@@ -1999,6 +2105,33 @@ class MaldetAPI:
         return 400, {"error": "Unknown monitor action: " + act}
 
     @staticmethod
+    def _monitor_scope(method, data):
+        """Select recursive user homes or only their public_html/htdocs dirs."""
+        if method not in ("GET", "PUT"):
+            return 405, {"error": "Method not allowed"}
+        conf_path = get_conf_path()
+        config = parse_config(conf_path)
+        if "__error__" in config:
+            return 503, {"error": config["__error__"]["error"]}
+        docroot = config.get("inotify_docroot")
+        if not isinstance(docroot, dict):
+            return 503, {"error": "Missing inotify_docroot configuration"}
+        value = docroot["value"]
+        scope = {"": "recursive", "public_html,htdocs": "webroots"}.get(value, "custom")
+        if method == "GET":
+            return 200, {"scope": scope, "docroot": value, "restart_required": True}
+        requested = data.get("scope")
+        if requested not in ("recursive", "webroots"):
+            return 400, {"error": "scope must be 'recursive' or 'webroots'"}
+        ok, message = write_config_change(
+            conf_path, "inotify_docroot",
+            "" if requested == "recursive" else "public_html,htdocs")
+        if not ok:
+            return 500, {"error": message}
+        return 200, {"message": "Monitor scope saved", "scope": requested,
+                     "restart_required": True}
+
+    @staticmethod
     def _monitor_users(method, data):
         """List and persist per-user exclusions for `maldet -m users`."""
         config = parse_config()
@@ -2364,7 +2497,7 @@ def main():
     MALDET_BIN = args.maldet_bin
 
     # Upgrade existing cron entries so scheduled runs carry provenance, too.
-    if os.path.isfile(get_schedules_path()):
+    if os.path.isfile(get_schedules_path()) or os.path.isfile(get_managed_cron_path()):
         schedules = load_schedules()
         if schedules:
             ok, error = write_managed_cron_file(schedules)

@@ -26,6 +26,37 @@ PKG_BACKUP_PRUNE_DAYS="30"
 # shellcheck disable=SC1091
 source files/internals/pkg_lib.sh
 
+# Report each installer operation without exposing command arguments (which
+# may include configuration or credentials).
+_install_step() {
+	local _label="$1" _start=$SECONDS _rc
+	shift
+	pkg_info "[running] $_label"
+	"$@"
+	_rc=$?
+	if [ "$_rc" -eq 0 ]; then
+		pkg_info "[ok] $_label ($((SECONDS - _start))s)"
+	else
+		pkg_error "[failed] $_label (exit $_rc, $((SECONDS - _start))s)"
+	fi
+	return "$_rc"
+}
+
+_install_service_status() {
+	local _name="$1" _state _pid
+	if pkg_is_systemd; then
+		_state=$(systemctl is-active "$_name.service" 2>/dev/null) || :
+		_pid=$(systemctl show "$_name.service" -p MainPID --value 2>/dev/null) || :
+		[ -n "$_state" ] || _state="unavailable"
+		[ -n "$_pid" ] && [ "$_pid" != "0" ] || _pid="-"
+		pkg_item "$_name" "$_state (PID $_pid)"
+	elif pkg_service_status "$_name"; then
+		pkg_item "$_name" "running (init)"
+	else
+		pkg_item "$_name" "stopped or unavailable (init)"
+	fi
+}
+
 # Detect the desktop session independently of the installer shell.  Installers
 # are commonly run through sudo, where DISPLAY/XDG_CURRENT_DESKTOP are absent.
 _detect_graphical_environment() {
@@ -249,9 +280,11 @@ clamav_paths="/usr/local/cpanel/3rdparty/share/clamav/ /var/lib/clamav/ /var/cla
 # Core file installation (silent — no user output)
 
 _install_core() {
-	pkg_copy_tree "files" "$inspath"
+	pkg_copy_tree "files" "$inspath" || return $?
+	command cp -f uninstall.sh "$inspath/uninstall.sh" || return $?
+	chmod 755 "$inspath/uninstall.sh" || return $?
 	if [ -d "gui" ]; then
-		pkg_copy_tree "gui" "$inspath/gui"
+		pkg_copy_tree "gui" "$inspath/gui" || return $?
 		chmod 755 "$inspath/gui/launch.sh" "$inspath/gui/open_gui.sh" \
 			"$inspath/gui/maldet_gui.py" "$inspath/gui/maldet_systray.sh"
 		pkg_symlink "$inspath/gui/launch.sh" /usr/local/sbin/maldet-gui
@@ -296,6 +329,7 @@ _install_core() {
 		clamav_linksigs "$lp"
 	done
 	killall -SIGUSR2 clamd 2>/dev/null  # safe: signal ClamAV to reload sigs
+	return 0
 }
 
 _read_conf_value() {
@@ -343,9 +377,28 @@ _migrate_logs() {
 # Cron & service installation
 
 _install_cron_service() {
-	pkg_cron_install cron.daily /etc/cron.daily/maldet
-	pkg_cron_install cron.watchdog /etc/cron.weekly/maldet-watchdog
-	pkg_cron_install cron.d.pub /etc/cron.d/maldet_pub
+	pkg_cron_install cron.daily /etc/cron.daily/maldet || return $?
+	pkg_cron_install cron.watchdog /etc/cron.weekly/maldet-watchdog || return $?
+	pkg_cron_install cron.d.pub /etc/cron.d/maldet_pub || return $?
+	if [ -f "$inspath/gui/maldet_gui.py" ]; then
+		local _gui_cron=/etc/cron.d/maldet-gui-schedules
+		local _gui_json="$inspath/gui.schedules.json"
+		local _gui_previous_json="$_gui_json"
+		local _gui_backup
+		if [ -n "${bkpath:-}" ] && [ -f "$bkpath/gui.schedules.json" ]; then
+			_gui_previous_json="$bkpath/gui.schedules.json"
+		fi
+		if { [ -f "$_gui_cron" ] && ! cmp -s files/cron/maldet-gui-schedules "$_gui_cron"; } ||
+		   { [ -f "$_gui_previous_json" ] && ! cmp -s files/cron/gui.schedules.json "$_gui_previous_json"; }; then
+			command mkdir -p /var/backups || return $?
+			_gui_backup=$(command mktemp -d /var/backups/maldet-gui-schedules.XXXXXXXX) || return $?
+			[ ! -f "$_gui_cron" ] || command cp -p "$_gui_cron" "$_gui_backup/maldet-gui-schedules" || return $?
+			[ ! -f "$_gui_previous_json" ] || command cp -p "$_gui_previous_json" "$_gui_backup/gui.schedules.json" || return $?
+			pkg_info "Previous GUI schedules backed up to $_gui_backup"
+		fi
+		pkg_cron_install files/cron/maldet-gui-schedules "$_gui_cron" || return $?
+		command install -m 644 files/cron/gui.schedules.json "$_gui_json" || return $?
+	fi
 
 	# Independent sig update cron (sigup_interval, default 6h)
 	# Source installed conf.maldet to read sigup_interval — conf is already
@@ -356,7 +409,7 @@ _install_cron_service() {
 	local _sigup_interval
 	_sigup_interval=$(_read_conf_value "sigup_interval" "6")
 	if [ "$_sigup_interval" != "0" ] && [ "$_sigup_interval" -gt 0 ] 2>/dev/null; then
-		pkg_cron_install cron.d.sigup /etc/cron.d/maldet-sigup
+		pkg_cron_install cron.d.sigup /etc/cron.d/maldet-sigup || return $?
 		# Replace default interval with configured value
 		if [ "$_sigup_interval" != "6" ]; then
 			command sed -i "s|\\*/6|\\*/$_sigup_interval|g" /etc/cron.d/maldet-sigup
@@ -370,10 +423,10 @@ _install_cron_service() {
 		pkg_detect_os
 		_init_system=$(cat /proc/1/comm 2>/dev/null)
 		if test "$_init_system" == "systemd"; then
-			pkg_service_install maldet ./files/service/maldet.service
+			pkg_service_install maldet ./files/service/maldet.service || return $?
 			systemctl enable maldet.service 2>/dev/null  # safe: idempotent
 		else
-			pkg_service_install maldet ./files/service/maldet.sh
+			pkg_service_install maldet ./files/service/maldet.sh || return $?
 			if [ "$_PKG_OS_FAMILY" = "rhel" ] && command -v chkconfig >/dev/null 2>&1; then
 				chkconfig --level 2345 maldet on
 			fi
@@ -482,6 +535,24 @@ _postinfo() {
 	pkg_item "Exec link" "/usr/local/sbin/maldet"
 	pkg_item "Exec link" "/usr/local/sbin/lmd"
 	pkg_item "Cron.daily" "/etc/cron.daily/maldet"
+	pkg_section "Installed configuration"
+	pkg_item "Default monitor mode" "$(_read_conf_value default_monitor_mode users)"
+	pkg_item "Quarantine hits" "$(_read_conf_value quarantine_hits 1)"
+	pkg_item "Sigup interval" "$(_read_conf_value sigup_interval 6)h"
+	if [ -f "$inspath/gui/maldet_gui.py" ]; then
+		local _gui_env="/etc/sysconfig/maldet-gui" _gui_port
+		[ -f "$_gui_env" ] || _gui_env="/etc/default/maldet-gui"
+		_gui_port=$(sed -n 's/^MALDET_GUI_PORT=//p' "$_gui_env" 2>/dev/null | tail -1)
+		_gui_port="${_gui_port//\"/}"
+		pkg_item "GUI port" "${_gui_port:-not configured}"
+	fi
+	pkg_section "Process status"
+	_install_service_status maldet
+	if [ -f "$inspath/gui/maldet_gui.py" ]; then
+		_install_service_status maldet-gui
+	else
+		pkg_item "maldet-gui" "not installed"
+	fi
 }
 
 # Restart monitor if it was running
@@ -490,11 +561,14 @@ _restart_monitor() {
 	if [ "${monmode:-}" == "1" ]; then
 		if pkg_is_systemd && systemctl is-enabled maldet.service >/dev/null 2>&1; then
 			pkg_info "restarting monitor via systemctl"
-			systemctl restart maldet.service >>/dev/null 2>&1 &
+			systemctl restart maldet.service
 		else
 			pkg_info "restarting monitor with supervisor mode"
 			"$inspath/maldet" -b -m users >>/dev/null 2>&1 &
+			pkg_info "monitor launch requested (PID $!); check process status below"
 		fi
+	else
+		pkg_info "monitor was not running; no restart needed"
 	fi
 }
 
@@ -509,7 +583,7 @@ if [ -d "$inspath" ] && [ -d "files" ]; then
 	echo "            (C) 2026, Ryan MacDonald <ryan@rfxn.com>"
 	echo "This program may be freely redistributed under the terms of the GNU GPL v2"
 
-	_install_dependencies || exit 1
+	_install_step "Runtime dependencies" _install_dependencies || exit $?
 	# Stop active monitor before backup (detect both supervisor and legacy modes)
 	if [ -f "$inspath/tmp/monitor.pid" ]; then
 		_mpid=$(command cat "$inspath/tmp/monitor.pid")
@@ -521,7 +595,9 @@ if [ -d "$inspath" ] && [ -d "files" ]; then
 		monmode=1
 	fi
 	if [ "${monmode:-}" == "1" ]; then
-		"$inspath/maldet" -k >>/dev/null 2>&1
+		_install_step "Stop active monitor" "$inspath/maldet" -k || exit $?
+	else
+		pkg_info "[skipped] Stop active monitor (not running)"
 	fi
 
 	pkg_section "Backing up existing installation"
@@ -534,7 +610,7 @@ if [ -d "$inspath" ] && [ -d "files" ]; then
 		chattr -ia "$inspath/internals/internals.conf"
 	fi
 	# Create backup (move method — removes original)
-	if ! pkg_backup "$inspath" "move"; then
+	if ! _install_step "Back up existing installation" pkg_backup "$inspath" "move"; then
 		pkg_error "failed to backup $inspath, aborting install."
 		exit 1
 	fi
@@ -542,13 +618,14 @@ if [ -d "$inspath" ] && [ -d "files" ]; then
 	bkpath=$(pkg_backup_path "$inspath")
 
 	pkg_section "Installing files"
-	_install_core
-	_migrate_logs
-	_install_cron_service
-	_install_gui_service
+	_install_step "Install core files and shortcuts" _install_core || exit $?
+	_install_step "Migrate logs" _migrate_logs || exit $?
+	_install_step "Install cron jobs and monitor service" _install_cron_service || exit $?
+	_install_step "Install WebGUI service" _install_gui_service || exit $?
 
 	pkg_section "Importing configuration"
-	BK_LAST="$bkpath" DEST_PREFIX="$inspath" "$inspath/internals/importconf"
+	BK_LAST="$bkpath" DEST_PREFIX="$inspath" \
+		_install_step "Import previous configuration" "$inspath/internals/importconf" || exit $?
 
 	# Re-evaluate sigup_interval after config import (user may have set to 0)
 	_post_sigup_interval=$(_read_conf_value "sigup_interval" "6")
@@ -558,9 +635,9 @@ if [ -d "$inspath" ] && [ -d "files" ]; then
 	unset _post_sigup_interval
 
 	pkg_section "Updating signatures"
-	"$inspath/maldet" --update 1
+	_install_step "Update signatures" "$inspath/maldet" --update 1 || pkg_warn "signature update failed; retry with maldet --update"
 
-	_restart_monitor
+	_install_step "Restore monitor state" _restart_monitor || pkg_warn "monitor restart failed"
 	_postinfo
 	pkg_success "Linux Malware Detect ${lmd_version} upgrade complete"
 
@@ -571,20 +648,20 @@ elif [ -d "files" ]; then
 	echo "            (C) 2026, Ryan MacDonald <ryan@rfxn.com>"
 	echo "This program may be freely redistributed under the terms of the GNU GPL v2"
 
-	_install_dependencies || exit 1
+	_install_step "Runtime dependencies" _install_dependencies || exit $?
 	pkg_section "Installing files"
-	_install_core
-	_migrate_logs
+	_install_step "Install core files and shortcuts" _install_core || exit $?
+	_install_step "Migrate logs" _migrate_logs || exit $?
 	# Create empty monitor_paths.extra if not restored from backup
 	if [ ! -f "$inspath/monitor_paths.extra" ]; then
 		touch "$inspath/monitor_paths.extra"
 		chmod 640 "$inspath/monitor_paths.extra"
 	fi
-	_install_cron_service
-	_install_gui_service
+	_install_step "Install cron jobs and monitor service" _install_cron_service || exit $?
+	_install_step "Install WebGUI service" _install_gui_service || exit $?
 
 	pkg_section "Updating signatures"
-	"$inspath/maldet" --update 1
+	_install_step "Update signatures" "$inspath/maldet" --update 1 || pkg_warn "signature update failed; retry with maldet --update"
 
 	_postinfo
 	pkg_success "Linux Malware Detect ${lmd_version} installation complete"

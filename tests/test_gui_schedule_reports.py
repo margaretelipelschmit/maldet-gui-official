@@ -1,5 +1,6 @@
 """Scheduled report attribution without running a malware scan."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -15,6 +16,97 @@ spec.loader.exec_module(gui)
 
 
 class ScheduleReportsTest(unittest.TestCase):
+    def test_installer_schedule_defaults_match_cron_and_gui_model(self):
+        cron = (ROOT / "files/cron/maldet-gui-schedules").read_text()
+        saved = json.loads((ROOT / "files/cron/gui.schedules.json").read_text())["schedules"]
+        self.assertEqual(len(saved), 3)
+        with patch.object(gui, "get_base_dir", return_value="/usr/local/maldetect"), \
+                patch.object(gui, "get_managed_cron_path",
+                             return_value=str(ROOT / "files/cron/maldet-gui-schedules")):
+            self.assertEqual(gui.read_managed_cron_schedules(), saved)
+            generated = (
+                "# Managed by Maldet GUI (Agendamentos) - do not edit manually.\n"
+                "# This file is regenerated automatically whenever schedules change.\n"
+                + "".join(gui.build_schedule_cron_line(schedule) + "\n"
+                          for schedule in saved))
+            self.assertEqual(cron, generated)
+
+    def test_cron_only_schedules_are_imported_and_survive_other_deletions(self):
+        with tempfile.TemporaryDirectory() as base, \
+                patch.object(gui, "get_base_dir", return_value=base), \
+                patch.object(gui, "get_schedules_path",
+                             return_value=str(Path(base, "gui.schedules.json"))), \
+                patch.object(gui, "get_managed_cron_path",
+                             return_value=str(Path(base, "maldet-gui-schedules"))):
+            original = {
+                "id": "sch_123_abcdef", "name": "Saved", "path": "/",
+                "scan_type": "all", "frequency": "daily", "enabled": True,
+            }
+            imported = {
+                "id": "sch_456_012abc", "name": "Cron only",
+                "path": "/home/space dir", "scan_type": "recent", "days": 2,
+                "frequency": "weekly", "minute": 5, "hour": 4, "weekday": 2,
+                "enabled": False,
+            }
+            Path(gui.get_schedules_path()).write_text(
+                json.dumps({"schedules": [original]}))
+            line = gui.build_schedule_cron_line(imported)
+            # Legacy entries do not set MALDET_GUI_SCHEDULE_ID.
+            line = line.replace("MALDET_GUI_SCHEDULE_ID=sch_456_012abc ", "")
+            unmanaged = "0 0 * * * root /usr/bin/true\n"
+            Path(gui.get_managed_cron_path()).write_text(
+                gui.build_schedule_cron_line(original) + "\n" + line + "\n" + unmanaged)
+            status, result = gui.MaldetAPI.handle("GET", "/api/schedules")
+            self.assertEqual(status, 200)
+            self.assertEqual(len(result["schedules"]), 2)
+            self.assertEqual(result["schedules"][0], original)
+            self.assertEqual(result["schedules"][1]["path"], "/home/space dir")
+            self.assertEqual(result["schedules"][1]["frequency"], "weekly")
+            self.assertFalse(result["schedules"][1]["enabled"])
+            self.assertEqual(len(json.loads(Path(gui.get_schedules_path()).read_text())["schedules"]), 2)
+
+            status, _ = gui.MaldetAPI.handle("DELETE", "/api/schedules/" + original["id"])
+            self.assertEqual(status, 200)
+            self.assertEqual([s["id"] for s in gui.load_schedules()], [imported["id"]])
+            self.assertIn(unmanaged, Path(gui.get_managed_cron_path()).read_text())
+
+    def test_cron_only_schedule_without_json_and_custom_timing(self):
+        with tempfile.TemporaryDirectory() as base, \
+                patch.object(gui, "get_base_dir", return_value=base), \
+                patch.object(gui, "get_schedules_path",
+                             return_value=str(Path(base, "gui.schedules.json"))), \
+                patch.object(gui, "get_managed_cron_path",
+                             return_value=str(Path(base, "maldet-gui-schedules"))):
+            schedule = {
+                "id": "sch_789_aabbcc", "name": "Custom scan", "path": "/",
+                "scan_type": "all", "frequency": "custom",
+                "cron_expr": "*/15 1-3 * * 1,3", "enabled": True,
+            }
+            Path(gui.get_managed_cron_path()).write_text(
+                gui.build_schedule_cron_line(schedule) + "\n")
+            status, result = gui.MaldetAPI.handle("GET", "/api/schedules")
+            self.assertEqual(status, 200)
+            self.assertEqual(result["schedules"][0]["cron_expr"], schedule["cron_expr"])
+            self.assertTrue(Path(gui.get_schedules_path()).exists())
+
+    def test_invalid_managed_cron_does_not_overwrite_existing_schedules(self):
+        with tempfile.TemporaryDirectory() as base, \
+                patch.object(gui, "get_base_dir", return_value=base), \
+                patch.object(gui, "get_schedules_path",
+                             return_value=str(Path(base, "gui.schedules.json"))), \
+                patch.object(gui, "get_managed_cron_path",
+                             return_value=str(Path(base, "maldet-gui-schedules"))):
+            cron = Path(gui.get_managed_cron_path())
+            invalid = "0 3 * * * root /usr/bin/false  # gui-schedule:sch_123_abcdef Bad\n"
+            cron.write_text(invalid)
+            status, result = gui.MaldetAPI.handle("GET", "/api/schedules")
+            self.assertEqual(status, 500)
+            self.assertIn("error", result)
+            ok, error = gui.write_managed_cron_file([])
+            self.assertFalse(ok)
+            self.assertIsNotNone(error)
+            self.assertEqual(cron.read_text(), invalid)
+
     def test_reports_only_from_own_schedule_even_when_paths_match(self):
         with tempfile.TemporaryDirectory() as session:
             own = "sch_123_abcdef"

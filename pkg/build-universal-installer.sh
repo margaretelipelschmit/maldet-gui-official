@@ -45,7 +45,10 @@ mkdir -p "$dist_dir"
 rm -f "$dist_dir/$bundle_name.tar.gz" "$dist_dir/$bundle_name.tar.gz.sha256"
 tar -C "$stage_dir" --sort=name --owner=0 --group=0 --numeric-owner \
 	-czf "$dist_dir/$bundle_name.tar.gz" "$bundle_name"
-sha256sum "$dist_dir/$bundle_name.tar.gz" > "$dist_dir/$bundle_name.tar.gz.sha256"
+(
+	cd "$dist_dir"
+	sha256sum "$bundle_name.tar.gz" > "$bundle_name.tar.gz.sha256"
+)
 
 printf 'Created %s\n' "$dist_dir/$bundle_name.tar.gz"
 printf 'Archive SHA256: '

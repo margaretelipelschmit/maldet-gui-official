@@ -27,6 +27,20 @@ sudo bash install.sh
 O instalador identifica a distribuição, verifica dependências e instala o
 Maldet, a GUI e os launchers:
 
+Em uma instalação nova, o instalador copia `files/conf.maldet` para
+`/usr/local/maldetect/conf.maldet` com o monitor no modo `users` (todos os
+diretórios pessoais, não apenas `public_html`), quarentena automática ativada,
+verificação de assinaturas a cada 6 horas e WebGUI na porta 8080. O resumo
+**Installed configuration** exibe os valores instalados. Em atualizações,
+`importconf` preserva as configurações personalizadas, sem redefini-las.
+
+Durante a instalação, cada etapa mostra `[running]`, `[ok]` ou `[failed]`,
+incluindo o tempo gasto e o código de saída em caso de falha. Ao final,
+**Process status** mostra o estado e PID dos serviços `maldet` e `maldet-gui`
+(quando instalados); um monitor desativado aparece como inativo, não como
+erro de instalação. O relatório não exibe argumentos nem a lista de processos
+de outros aplicativos do servidor.
+
 | Componente | Caminho |
 |---|---|
 | Servidor da GUI | `/usr/local/maldetect/gui/maldet_gui.py` |
@@ -157,7 +171,13 @@ o resultado depois que um scan termina.
 
 Permite iniciar, parar ou recarregar o monitor inotify e visualizar os paths
 monitorados. O monitor reage a arquivos criados ou alterados nos diretórios
-configurados.
+configurados. Em **Escopo dos diretórios dos usuários**, escolha **Todas as
+pastas de cada usuário (recursivo)** ou **Apenas public_html e htdocs de cada
+usuário** e salve; use **Recarregar** para aplicar ao monitor em execução.
+O modo restrito não inclui document roots adicionais, `/tmp`, `/var/tmp`,
+`/dev/shm` nem caminhos extras configurados. Se `inotify_docroot` tiver um
+valor personalizado, a tela o indica sem substituir esse valor até salvar
+um dos dois modos. A seleção individual de usuários continua independente.
 
 ### Updates
 
@@ -251,6 +271,10 @@ administração exige root.
 sudo bash /usr/local/maldetect/uninstall.sh
 ```
 
-O desinstalador remove os launchers, atalhos e arquivos instalados conforme o
-escopo normal do pacote. Preserve previamente relatórios ou configurações que
-precisem ser mantidos.
+Antes de remover a instalação, o desinstalador copia e confere a quarentena
+(incluindo arquivos `.info`) e `sess/quarantine.hist*` em um diretório protegido
+sob `/var/backups/maldetect/quarantine.*`. Se não conseguir criar ou conferir
+essa cópia, interrompe a desinstalação. Arquivos suspeitos **não são
+restaurados** automaticamente aos caminhos originais. Backups anteriores
+`/usr/local/maldetect.*` também não são apagados. Preserve separadamente
+relatórios e configurações que precisem ser mantidos.
