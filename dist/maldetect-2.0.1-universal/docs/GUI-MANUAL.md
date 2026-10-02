@@ -178,6 +178,24 @@ O modo restrito não inclui document roots adicionais, `/tmp`, `/var/tmp`,
 `/dev/shm` nem caminhos extras configurados. Se `inotify_docroot` tiver um
 valor personalizado, a tela o indica sem substituir esse valor até salvar
 um dos dois modos. A seleção individual de usuários continua independente.
+Em **Pastas monitoradas**, digite um caminho absoluto (por exemplo
+`/var/www/html`) ou clique em **Procurar** para abrir o diálogo de seleção de
+pasta e navegar pelos diretórios do servidor; a pasta escolhida é adicionada à
+lista automaticamente. Também é possível digitá-la e clicar em **Adicionar
+pasta** (ou pressionar Enter). Use **Remover** para tirar um item e **Salvar
+pastas** para gravar em `monitor_paths_extra`. As pastas são adicionadas ao
+escopo monitorado sem substituir o modo principal, precisam existir no
+servidor e passam a valer após **Recarregar**.
+O card **Detecção de pastas de e-mail** identifica o servidor de e-mail em
+execução (Postfix, Exim, Dovecot, Sendmail, Courier, Cyrus) e lista as pastas de
+correio detectadas (`/var/mail`, `/var/spool/imap`, `/var/vmail`, bases Maildir
+lidas de `dovecot.conf`, `main.cf` e `imapd.conf`). Marque **Monitorar pastas de
+e-mail detectadas** para adicioná-las à lista do monitor (modo `users`) e clique
+em **Salvar**; desmarque para não monitorá-las. As pastas são adicionadas **em
+acréscimo** ao escopo atual (nada é substituído), a configuração é persistida em
+`inotify_maildir_autodetect` e só passa a valer após **Recarregar**. Em modo
+apenas webroots, o card avisa que essas pastas não são monitoradas. Use
+`maldet --mail-detect` para conferir a detecção pela linha de comando.
 
 ### Updates
 
@@ -213,8 +231,30 @@ podem remover dados históricos; confirme o escopo antes de executar.
 
 ### System Info
 
-Exibe caminhos, comandos disponíveis, versão, uso de disco/memória e dados do
-ambiente necessários para suporte.
+Apresenta cartões de CPU, RAM e disco com barras de uso; CPU e RAM vêm da
+leitura atual de `/api/system/usage`, enquanto o disco reflete o volume da
+instalação. A tela é atualizada automaticamente, indica métricas indisponíveis
+sem tratá-las como 0% e mostra estado do monitor e scans ativos, versões,
+caminhos, ambiente e disponibilidade dos binários necessários para suporte.
+Os botões no canto superior direito oferecem **Recarregar WebGUI** e **Reiniciar
+servidor**. **Recarregar WebGUI** reinicia o serviço `maldet-gui` no servidor
+(recarregando o app.js e os demais assets) **sem reiniciar o sistema operacional**;
+ao confirmar, o serviço é reiniciado após **10 segundos** e um **contador regressivo
+de 00:10** é exibido e retomado automaticamente se a página for recarregada. Ao
+chegar a zero, o navegador passa a verificar periodicamente (a cada 5 segundos) o
+endpoint público de saúde (`/api/auth/status`) e **atualiza a página automaticamente**
+assim que o serviço volta a responder. Requer sessão autenticada e execução da WebGUI
+como root. **Reiniciar servidor** reinicia o **sistema operacional inteiro**, não
+apenas a WebGUI: após confirmação, agenda o reboot para um minuto depois e exibe um
+**contador regressivo de 01:00** que atualiza a cada segundo e é retomado
+automaticamente se a página for recarregada; scans e conexões serão interrompidos ao
+final da contagem. Ao chegar a zero, o navegador passa a verificar periodicamente
+(a cada 5 segundos) o mesmo endpoint de saúde e **atualiza a página automaticamente**
+assim que o servidor volta a responder, reconectando a WebGUI sem intervenção; a
+verificação só recarrega após constatar que o host caiu (ou após uma pequena janela
+de tolerância) e desiste após 10 minutos sem resposta. Requer sessão autenticada e
+execução da WebGUI como root. Em caso de falha, exibe o erro sem indicar sucesso.
+Não use durante scans que precisem terminar.
 
 ## 6. Alertas Telegram
 

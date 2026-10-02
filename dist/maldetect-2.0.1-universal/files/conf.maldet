@@ -407,6 +407,16 @@ inotify_docroot=""
 # [ 0 = disabled (default), 1 = enabled ]
 inotify_docroot_autodetect="1"
 
+# Auto-detect the running mail server (Postfix, Exim, Dovecot, Sendmail,
+# Courier, Cyrus) and its mail data folder(s), then add the detected mail
+# folders (e.g. /var/mail, /var/vmail, Maildir bases) to the inotify watch
+# list in `users` mode. Detected paths are added IN ADDITION TO the
+# inotify_docroot subdirectories above (nothing is replaced). Use
+# `maldet --mail-detect` to preview which mail server and mail folders are
+# detected on this host.
+# [ 0 = disabled (default), 1 = enabled ]
+inotify_maildir_autodetect="1"
+
 # Process CPU scheduling (nice) priority level for inotify monitor operations.
 # [ -19 = high prio , 19 = low prio, default = 18 ]
 inotify_cpunice="18"

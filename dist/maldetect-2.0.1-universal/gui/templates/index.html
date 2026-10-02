@@ -53,6 +53,8 @@
                     </label>
                     <button class="btn btn-ghost btn-sm" id="refresh-btn" title="Refresh">🔄</button>
                     <button class="btn btn-ghost btn-sm" id="settings-btn" title="Settings">⚙️</button>
+                    <button class="btn btn-ghost btn-sm" id="reload-gui-btn" type="button" title="Reload WebGUI" aria-label="Reload WebGUI">🔃 <span>Reload WebGUI</span></button>
+                    <button class="btn btn-danger btn-sm" id="system-reboot-btn" type="button" title="Reboot Server" aria-label="Reboot Server">⏻ <span>Reboot Server</span></button>
                 </div>
             </div>
             <div class="content" id="content">
@@ -61,7 +63,7 @@
         </div>
     </div>
     <div id="toast-container"></div>
-    <script src="/static/app.js?v=51"></script>
+    <script src="/static/app.js?v=53"></script>
     <script>
     // Boot check: se o app.js não carregar/executar (cache antigo, bloqueio,
     // erro de rede), mostra o motivo na própria página em vez de "Loading...".

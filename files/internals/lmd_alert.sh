@@ -967,6 +967,108 @@ _lmd_render_json_list() {
 				printf '}\n'
 			} >> "$_sortbuf"
 		done < "$_index_file"
+
+		# Pass 1b: TSV session files missing from session.index.
+		# session.index is append-only and is only fully rebuilt when the file is
+		# absent, so a scan whose index append was lost (ENOSPC, SIGKILL between
+		# the TSV and index writes, a restored backup) leaves a session.tsv.* on
+		# disk that Pass 1 never sees. _view_session_list in lmd_session.sh
+		# already sweeps those per-file; without the mirror here such reports stay
+		# invisible to `maldet --format json --report list`, which is exactly
+		# what the WebGUI Reports page consumes — the report exists on disk but
+		# never shows up in the GUI. Flagged "source": "tsv-unindexed" so the
+		# provenance is visible to consumers.
+		local _tsv _tsv_sid _tsv_scanid
+		for _tsv in "$sessdir"/session.tsv.[0-9]*; do
+			[ -f "$_tsv" ] || continue
+			# _session_compress leaves session.tsv.<id>.gz behind. Its suffix
+			# ("<id>.gz") never matches the indexed scan ID, so it would be
+			# re-read as an unindexed duplicate with binary garbage. The
+			# compressed original is already covered by its index row.
+			case "$_tsv" in *.gz) continue ;; esac
+			_tsv_sid="${_tsv##*.tsv.}"
+			[ -n "${_seen_ids[$_tsv_sid]:-}" ] && continue
+			# Header field order (see _session_index_rebuild, lmd_lifecycle.sh:612).
+			local _t_fmt _t_alert _t_hostname _t_path _t_days
+			local _t_started_hr _t_end_hr _t_elapsed _t_fl_et
+			local _t_tot_files _t_tot_hits _t_tot_cl
+			local _t_scanner_ver _t_sig_ver _t_hashtype _t_engine _t_quar _t_hostid
+			IFS=$'\t' read -r _t_fmt _t_alert _tsv_scanid _t_hostname _t_path _t_days \
+				_t_started_hr _t_end_hr _t_elapsed _t_fl_et \
+				_t_tot_files _t_tot_hits _t_tot_cl \
+				_t_scanner_ver _t_sig_ver _t_hashtype _t_engine _t_quar _t_hostid \
+				< "$_tsv"
+			[ -n "${_tsv_scanid:-}" ] || continue  # safe: header-only/empty file
+			# The header scan ID is authoritative even when it differs from the
+			# filename suffix; it is also what /api/scans/<id> resolves.
+			_seen_ids["$_tsv_scanid"]=1
+			_seen_ids["$_tsv_sid"]=1
+			# Distinct non-empty field 3 (quarantine path): same rule as the index
+			# rebuild and the text list.
+			local _t_tot_quar
+			_t_tot_quar=$(awk -F'\t' '!/^#/ && $3 != "" && $3 != "-" && !seen[$3]++ { n++ } END { print n+0 }' "$_tsv")
+			# Epoch from started_hr; 0 on parse failure, which sorts the entry to
+			# the end (same fallback as the rebuild and the legacy pass).
+			local _t_ep
+			_t_ep=$(command date -d "${_t_started_hr:-}" "+%s" 2>/dev/null) || _t_ep=0  # safe: date parse failure sorts entry to end
+			[ -z "${_t_ep:-}" ] && _t_ep=0
+			{
+				printf '%s\t{' "$_t_ep"
+				_json_escape_var "$_tsv_scanid"
+				printf '"scan_id": "%s", ' "$_JSON_ESC_OUT"
+				if [ -z "${_t_path:-}" ] || [ "$_t_path" = "-" ]; then
+					printf '"path": null, '
+				else
+					_json_escape_var "$_t_path"
+					printf '"path": "%s", ' "$_JSON_ESC_OUT"
+				fi
+				if [ -z "${_t_started_hr:-}" ] || [ "$_t_started_hr" = "-" ]; then printf '"started": null, '
+				else printf '"started": "%s", ' "$_t_started_hr"; fi
+				printf '"started_epoch": %s, ' "$_t_ep"
+				if [ -z "${_t_elapsed:-}" ] || [ "$_t_elapsed" = "-" ] || [ "$_t_ep" = "0" ]; then
+					printf '"completed_epoch": null, '
+				else
+					printf '"completed_epoch": %s, ' "$((_t_ep + _t_elapsed))"
+				fi
+				if [ -z "${_t_elapsed:-}" ] || [ "$_t_elapsed" = "-" ]; then printf '"elapsed_seconds": null, '
+				else printf '"elapsed_seconds": %s, ' "$_t_elapsed"; fi
+				if [ -z "${_t_sig_ver:-}" ] || [ "$_t_sig_ver" = "-" ]; then
+					printf '"sig_version": null, '
+				else
+					_json_escape_var "$_t_sig_ver"
+					printf '"sig_version": "%s", ' "$_JSON_ESC_OUT"
+				fi
+				if [ "${_t_quar:-0}" = "1" ]; then printf '"quarantine_enabled": true, '
+				else printf '"quarantine_enabled": false, '; fi
+				if [ -z "${_t_tot_files:-}" ] || [ "$_t_tot_files" = "-" ]; then printf '"total_files": null, '
+				else printf '"total_files": %s, ' "$_t_tot_files"; fi
+				if [ -z "${_t_tot_hits:-}" ] || [ "$_t_tot_hits" = "-" ]; then printf '"total_hits": null, '
+				else printf '"total_hits": %s, ' "$_t_tot_hits"; fi
+				local _t_cl="${_t_tot_cl:-0}"
+				[ "$_t_cl" = "-" ] && _t_cl="0"
+				printf '"total_cleaned": %s, ' "$_t_cl"
+				printf '"total_quarantined": %s, ' "${_t_tot_quar:-0}"
+				if [ -z "${_t_end_hr:-}" ] || [ "$_t_end_hr" = "-" ]; then printf '"completed": null, '
+				else
+					_json_escape_var "$_t_end_hr"
+					printf '"completed": "%s", ' "$_JSON_ESC_OUT"
+				fi
+				if [ -z "${_t_engine:-}" ] || [ "$_t_engine" = "-" ]; then
+					printf '"engine": null, '
+				else
+					_json_escape_var "$_t_engine"
+					printf '"engine": "%s", ' "$_JSON_ESC_OUT"
+				fi
+				if [ -z "${_t_hashtype:-}" ] || [ "$_t_hashtype" = "-" ]; then
+					printf '"hash_type": null, '
+				else
+					_json_escape_var "$_t_hashtype"
+					printf '"hash_type": "%s", ' "$_JSON_ESC_OUT"
+				fi
+				printf '"source": "tsv-unindexed"'
+				printf '}\n'
+			} >> "$_sortbuf"
+		done
 	fi
 
 	# Pass 2: legacy plaintext sessions not in the index

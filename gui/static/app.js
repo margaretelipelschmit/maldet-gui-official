@@ -80,8 +80,11 @@
             options.method = 'GET';
             return this._fetch(path, options);
         },
-        post: function(path, body) {
-            return this._fetch(path, { method: 'POST', body: JSON.stringify(body || {}) });
+        post: function(path, body, options) {
+            options = options || {};
+            options.method = 'POST';
+            options.body = JSON.stringify(body || {});
+            return this._fetch(path, options);
         },
         put: function(path, body) {
             return this._fetch(path, { method: 'PUT', body: JSON.stringify(body || {}) });
@@ -119,6 +122,7 @@
 
     // ----- Toast Notifications -----
     function toast(message, type, duration) {
+        message = tr(String(message));
         type = type || 'info';
         duration = duration || 5000;
         var container = document.getElementById('toast-container');
@@ -128,6 +132,255 @@
         el.textContent = message;
         container.appendChild(el);
         setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, duration);
+    }
+
+    // ----- Reboot Countdown -----
+    // The backend schedules `shutdown -r +1`, so surface a visible 1-minute
+    // regressive timer as soon as the reboot is accepted. The deadline is
+    // stored in sessionStorage so a page reload resumes the countdown instead
+    // of restarting it from 01:00.
+    var REBOOT_DEADLINE_KEY = 'maldet.gui.rebootDeadline';
+    var REBOOT_COUNTDOWN_SECONDS = 60;
+    // The "Reload WebGUI" button restarts the maldet-gui service after a short
+    // delay, so show a matching countdown before the page reconnects.
+    var GUI_RELOAD_DEADLINE_KEY = 'maldet.gui.reloadDeadline';
+    var GUI_RELOAD_COUNTDOWN_SECONDS = 10;
+    var REBOOT_COUNTDOWN_LABELS = {
+        id: 'reboot-countdown',
+        aria: 'System reboot scheduled',
+        icon: '⏻',
+        title: 'System reboot scheduled',
+        text: 'The server will restart in',
+        hint: 'Active scans and connections will be interrupted.'
+    };
+    var RELOAD_COUNTDOWN_LABELS = {
+        id: 'reload-countdown',
+        aria: 'WebGUI restart scheduled',
+        icon: '🔃',
+        title: 'WebGUI restart scheduled',
+        text: 'The WebGUI will restart in',
+        hint: 'The page reconnects automatically when the service is back.'
+    };
+    // After the countdown reaches zero the service goes down. Instead of
+    // guessing how long that takes, poll the public health endpoint until the
+    // WebGUI answers again and then refresh the page automatically.
+    var REBOOT_POLL_INTERVAL_SECONDS = 5;
+    var REBOOT_POLL_GRACE_SECONDS = 20;   // let the host go down before trusting a first "up"
+    var REBOOT_POLL_MAX_SECONDS = 600;    // stop probing after 10 minutes without success
+    var REBOOT_POLL_TIMEOUT_MS = 3000;    // per-request timeout for the health probe
+    var _rebootCountdownOverlay = null;
+    var _rebootCountdownTimerEl = null;
+    var _rebootCountdownTextEl = null;
+    var _rebootCountdownInterval = null;
+    var _rebootCountdownDeadline = 0;
+    var _countdownLabels = null;
+    var _countdownStorageKey = REBOOT_DEADLINE_KEY;
+    var _rebootPollTimer = null;
+    var _rebootPollStartedAt = 0;
+    var _rebootPollSawDown = false;
+
+    function readCountdownDeadline(key) {
+        try {
+            return parseInt(sessionStorage.getItem(key), 10) || 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+    function writeCountdownDeadline(key, deadline) {
+        try { sessionStorage.setItem(key, String(deadline)); } catch (e) {}
+    }
+    function clearCountdownDeadline(key) {
+        try { sessionStorage.removeItem(key); } catch (e) {}
+    }
+    function formatRebootCountdown(totalSeconds) {
+        totalSeconds = Math.max(0, Math.floor(totalSeconds));
+        var minutes = Math.floor(totalSeconds / 60);
+        var seconds = totalSeconds % 60;
+        return (minutes < 10 ? '0' : '') + minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
+    }
+    function renderCountdownOverlay(labels) {
+        // Only one countdown is ever shown at a time; if a different one is on
+        // screen, replace it before building this one.
+        if (_rebootCountdownOverlay && _countdownLabels === labels) return;
+        if (_rebootCountdownOverlay) {
+            var previous = _rebootCountdownOverlay.parentNode;
+            if (previous && previous.removeChild) previous.removeChild(_rebootCountdownOverlay);
+        }
+        _countdownLabels = labels;
+        var overlay = document.createElement('div');
+        overlay.id = labels.id;
+        overlay.className = 'reboot-countdown-overlay';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-live', 'assertive');
+        overlay.setAttribute('aria-label', tr(labels.aria));
+        var card = document.createElement('div');
+        card.className = 'reboot-countdown-card';
+        var icon = document.createElement('div');
+        icon.className = 'reboot-countdown-icon';
+        icon.textContent = labels.icon;
+        var title = document.createElement('div');
+        title.className = 'reboot-countdown-title';
+        title.textContent = tr(labels.title);
+        var text = document.createElement('div');
+        text.className = 'reboot-countdown-text';
+        text.textContent = tr(labels.text);
+        var timer = document.createElement('div');
+        timer.className = 'reboot-countdown-timer';
+        timer.id = 'reboot-countdown-timer';
+        timer.setAttribute('role', 'timer');
+        var hint = document.createElement('div');
+        hint.className = 'reboot-countdown-hint';
+        hint.textContent = tr(labels.hint);
+        card.appendChild(icon);
+        card.appendChild(title);
+        card.appendChild(text);
+        card.appendChild(timer);
+        card.appendChild(hint);
+        overlay.appendChild(card);
+        (document.body || document.documentElement).appendChild(overlay);
+        _rebootCountdownOverlay = overlay;
+        _rebootCountdownTimerEl = timer;
+        _rebootCountdownTextEl = text;
+    }
+    function updateRebootCountdown() {
+        if (!_rebootCountdownTimerEl) return;
+        var remaining = Math.max(0, Math.ceil((_rebootCountdownDeadline - Date.now()) / 1000));
+        _rebootCountdownTimerEl.textContent = formatRebootCountdown(remaining);
+        if (remaining <= 0) {
+            if (_rebootCountdownTextEl) _rebootCountdownTextEl.textContent = tr('Restarting now...');
+            clearCountdownDeadline(_countdownStorageKey);
+            if (_rebootCountdownInterval) {
+                clearInterval(_rebootCountdownInterval);
+                _rebootCountdownInterval = null;
+            }
+            scheduleRebootReloadPoll();
+        }
+    }
+    // The timer hit zero and the host is going down for a reboot. Poll the
+    // public /api/auth/status endpoint until the WebGUI answers again, then
+    // refresh the page so the browser reconnects on its own instead of leaving
+    // a dead page open.
+    function scheduleRebootReloadPoll() {
+        if (_rebootPollTimer) return;
+        _rebootPollStartedAt = Date.now();
+        _rebootPollSawDown = false;
+        _rebootPollTimer = setInterval(pollRebootServer, REBOOT_POLL_INTERVAL_SECONDS * 1000);
+    }
+    function stopRebootReloadPoll() {
+        if (!_rebootPollTimer) return;
+        clearInterval(_rebootPollTimer);
+        _rebootPollTimer = null;
+    }
+    // Lightweight reachability probe to the public health endpoint. Kept separate
+    // from API._fetch so it never triggers the auth screen or the GET retry
+    // backoff while the host is rebooting.
+    function probeRebootServer(callback) {
+        var xhr;
+        try {
+            xhr = new XMLHttpRequest();
+        } catch (e) {
+            callback(false);
+            return;
+        }
+        var settled = false;
+        var finish = function(up) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            callback(up);
+        };
+        var timer = setTimeout(function() {
+            try { xhr.abort(); } catch (e) {}
+            finish(false);
+        }, REBOOT_POLL_TIMEOUT_MS);
+        xhr.open('GET', API.base + '/auth/status', true);
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== 4) return;
+            finish(xhr.status === 200);
+        };
+        xhr.onerror = function() { finish(false); };
+        xhr.send();
+    }
+    function pollRebootServer() {
+        probeRebootServer(function(up) {
+            var elapsed = Date.now() - _rebootPollStartedAt;
+            // Only trust an "up" answer once the host has actually gone down, or
+            // after the grace window in case the reboot finished faster than our
+            // first probe.
+            if (up && (_rebootPollSawDown || elapsed >= REBOOT_POLL_GRACE_SECONDS * 1000)) {
+                stopRebootReloadPoll();
+                window.location.reload();
+                return;
+            }
+            if (!up) _rebootPollSawDown = true;
+            if (elapsed >= REBOOT_POLL_MAX_SECONDS * 1000) stopRebootReloadPoll();
+        });
+    }
+    function beginCountdown(deadline, labels, storageKey) {
+        _rebootCountdownDeadline = deadline;
+        _countdownStorageKey = storageKey;
+        writeCountdownDeadline(storageKey, deadline);
+        renderCountdownOverlay(labels);
+        if (_rebootCountdownInterval) clearInterval(_rebootCountdownInterval);
+        _rebootCountdownInterval = setInterval(updateRebootCountdown, 1000);
+        updateRebootCountdown();
+    }
+    function startCountdown(totalSeconds, labels, storageKey) {
+        beginCountdown(Date.now() + totalSeconds * 1000, labels, storageKey);
+    }
+    function resumeCountdown(labels, storageKey) {
+        var deadline = readCountdownDeadline(storageKey);
+        if (!deadline) return;
+        if (deadline - Date.now() <= 0) { clearCountdownDeadline(storageKey); return; }
+        beginCountdown(deadline, labels, storageKey);
+    }
+    function startRebootCountdown(totalSeconds) {
+        startCountdown(totalSeconds || REBOOT_COUNTDOWN_SECONDS,
+            REBOOT_COUNTDOWN_LABELS, REBOOT_DEADLINE_KEY);
+    }
+    function resumeRebootCountdown() {
+        resumeCountdown(REBOOT_COUNTDOWN_LABELS, REBOOT_DEADLINE_KEY);
+    }
+    function startGuiReloadCountdown(totalSeconds) {
+        startCountdown(totalSeconds || GUI_RELOAD_COUNTDOWN_SECONDS,
+            RELOAD_COUNTDOWN_LABELS, GUI_RELOAD_DEADLINE_KEY);
+    }
+    function resumeGuiReloadCountdown() {
+        resumeCountdown(RELOAD_COUNTDOWN_LABELS, GUI_RELOAD_DEADLINE_KEY);
+    }
+    function initRebootButton() {
+        var rebootBtn = document.getElementById('system-reboot-btn');
+        if (!rebootBtn) return;
+        rebootBtn.addEventListener('click', function() {
+            if (!confirm(tr('Reboot the entire server in one minute? Active scans and connections will be interrupted.'))) return;
+            rebootBtn.disabled = true;
+            API.post('/system/reboot', {}).then(function() {
+                rebootBtn.disabled = false;
+                // The host reboots in one minute; show the regressive timer.
+                startRebootCountdown(REBOOT_COUNTDOWN_SECONDS);
+            }).catch(function(e) {
+                rebootBtn.disabled = false;
+                toast('Error: ' + e.message, 'error');
+            });
+        });
+    }
+    function initReloadGuiButton() {
+        var reloadBtn = document.getElementById('reload-gui-btn');
+        if (!reloadBtn) return;
+        reloadBtn.addEventListener('click', function() {
+            // Restart the maldet-gui backend service (fresh code/assets) after a
+            // short delay, then let the countdown reconnect the page.
+            if (!confirm(tr('Restart the WebGUI service in 10 seconds? The page will reconnect automatically.'))) return;
+            reloadBtn.disabled = true;
+            API.post('/system/reload', {}).then(function() {
+                reloadBtn.disabled = false;
+                startGuiReloadCountdown(GUI_RELOAD_COUNTDOWN_SECONDS);
+            }).catch(function(e) {
+                reloadBtn.disabled = false;
+                toast('Error: ' + e.message, 'error');
+            });
+        });
     }
 
     // ----- Format Helpers -----
@@ -165,7 +418,7 @@
         lang: localStorage.getItem('maldet.gui.language') || 'en',
         pt: {
             'Language': 'Idioma', 'English': 'Inglês', 'Português (Brasil)': 'Português (Brasil)',
-            'Dashboard': 'Painel', 'Scanner': 'Scanner', 'Scan Management': 'Gerenciamento de scans',
+            'Dashboard': 'Painel', 'Scanner': 'Scanner', 'Scan Management': 'Gerenciamento de verificações',
             'About Maldet': 'Sobre o Maldet',
             'Quarantine': 'Quarentena', 'Reports': 'Relatórios', 'Monitoring': 'Monitoramento',
             'Updates': 'Atualizações', 'Configuration': 'Configuração', 'Test Alerts': 'Testar alertas',
@@ -175,18 +428,18 @@
             'Online · Monitor ON': 'Online · Monitor ligado', 'Online · Monitor OFF': 'Online · Monitor desligado',
             'Loading...': 'Carregando...', 'Error': 'Erro', 'System Information': 'Informações do sistema',
             'Binary Detection': 'Detecção de binários', 'Scan Configuration': 'Configuração do scan',
-            'Scan Type': 'Tipo de scan', 'Scanner engine': 'Mecanismo do scanner', 'Path': 'Caminho',
+            'Scan Type': 'Tipo de verificação', 'Scanner engine': 'Mecanismo do scanner', 'Path': 'Caminho',
             'Browse': 'Procurar', 'Modified within (days)': 'Modificados nos últimos (dias)',
             'Config Overrides (-co)': 'Substituições de configuração (-co)', 'Include Regex (-i)': 'Regex de inclusão (-i)',
             'Exclude Regex (-x)': 'Regex de exclusão (-x)', 'Options': 'Opções',
             'Run in background (recommended)': 'Executar em segundo plano (recomendado)',
-            'Start Scan': 'Iniciar scan', 'Preparing...': 'Preparando...', 'Starting...': 'Iniciando...',
+            'Start Scan': 'Iniciar verificação', 'Preparing...': 'Preparando...', 'Starting...': 'Iniciando...',
             'Choose scan folder': 'Escolher pasta do scan', 'Cancel': 'Cancelar',
             'Select this folder': 'Selecionar esta pasta', 'Active Scans': 'Scans ativos',
             'Live updates every 3s': 'Atualização ao vivo a cada 3 s',
             'Live updates every 5s': 'Atualização ao vivo a cada 5 s', 'Details': 'Detalhes',
             'Stop': 'Parar', 'Stopping...': 'Parando...', 'Close': 'Fechar',
-            'Quarantined Files': 'Arquivos em quarentena', 'Scan Reports': 'Relatórios de scans',
+            'Quarantined Files': 'Arquivos em quarentena', 'Scan Reports': 'Relatórios de verificações',
             'Quarantine': 'Quarentenar', 'Restore': 'Restaurar', 'Inotify Monitoring': 'Monitoramento inotify',
             'Start': 'Iniciar', 'Reload': 'Recarregar', 'Update': 'Atualizar', 'Beta': 'Beta',
             'Update Sigs': 'Atualizar assinaturas', 'Update ClamAV': 'Atualizar ClamAV',
@@ -215,15 +468,15 @@
             'Hide raw file': 'Ocultar arquivo bruto',
             'File not installed': 'Arquivo não instalado',
             'No scheduled scans yet. Click "New Schedule" to create one.': 'Nenhum scan agendado ainda. Clique em "Novo agendamento" para criar um.',
-            'Name': 'Nome', 'Path': 'Caminho', 'Schedule': 'Frequência', 'Status': 'Status',
+            'Name': 'Nome', 'Path': 'Caminho', 'Schedule': 'Agendamento', 'Status': 'Status',
             'Enabled': 'Habilitado', 'Disabled': 'Desabilitado',
             'Edit': 'Editar', 'Delete': 'Excluir', 'Enable': 'Habilitar', 'Disable': 'Desabilitar',
             'View Reports': 'Ver relatórios', 'Reports for': 'Relatórios de',
             'No reports found yet for this schedule.': 'Nenhum relatório encontrado ainda para este agendamento.',
             'Delete this schedule? Its cron entry will be removed.': 'Excluir este agendamento? A entrada do cron será removida.',
             'Schedule saved': 'Agendamento salvo', 'Schedule deleted': 'Agendamento excluído',
-            'Schedule name': 'Nome do agendamento', 'Scan type': 'Tipo de scan',
-            'Full scan (all files)': 'Scan completo (todos os arquivos)',
+            'Schedule name': 'Nome do agendamento',             'Scan type': 'Tipo de verificação',
+            'Full scan (all files)': 'Verificação completa (todos os arquivos)',
             'Recent files only': 'Somente arquivos recentes',
             'Modified within (days)': 'Modificados nos últimos (dias)',
             'Frequency': 'Frequência', 'Daily': 'Diário', 'Weekly': 'Semanal', 'Custom (cron expression)': 'Personalizado (expressão cron)',
@@ -236,9 +489,9 @@
             'Save Schedule': 'Salvar agendamento', 'Saving...': 'Salvando...',
             'Daily at': 'Diariamente às', 'Weekly on': 'Semanalmente em', 'at': 'às',
             'Custom:': 'Personalizado:',
-            'Daily scan & maintenance': 'Scan diário e manutenção',
+            'Daily scan & maintenance': 'Verificação diária e manutenção',
             'Weekly signature watchdog': 'Verificação semanal de assinaturas',
-            'Public path scan trigger': 'Gatilho de scan de caminhos públicos',
+            'Public path scan trigger': 'Gatilho de verificação de caminhos públicos',
             'Independent signature updates': 'Atualizações independentes de assinaturas',
             'GUI-managed scheduled scans': 'Scans agendados gerenciados pela GUI',            'Save ignore list': 'Salvar lista de exclusão',
             'Ignore list saved': 'Lista de exclusão salva',
@@ -270,9 +523,9 @@
             'update:version update': 'Atualização de versão',
             'update:beta version update': 'Atualização para a versão beta',
             'update:clamav database update': 'Atualização da base de dados do ClamAV',
-            'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Scan concluído — ameaças encontradas!',
-            'Scan complete - no malware': 'Scan concluído — nenhum malware encontrado',
-            'Scan started in background': 'Scan iniciado em segundo plano', 'Monitor started': 'Monitor iniciado',
+            'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Verificação concluída — ameaças encontradas!',
+            'Scan complete - no malware': 'Verificação concluída — nenhum malware encontrado',
+            'Scan started in background': 'Verificação iniciada em segundo plano', 'Monitor started': 'Monitor iniciado',
             'Monitor stopped': 'Monitor parado', 'Monitor reloaded': 'Monitor recarregado',
             'Real-time monitoring (inotify)': 'Monitoramento em tempo real (inotify)',
             'Inotify': 'inotify',
@@ -299,6 +552,16 @@
             'Web server detection': 'Detecção de servidor web',
             'Web server detection is unavailable.': 'A detecção de servidor web está indisponível.',
             'No running web server detected.': 'Nenhum servidor web em execução foi detectado.',
+            'Email folder detection': 'Detecção de pastas de e-mail',
+            'Email folder detection is unavailable.': 'A detecção de pastas de e-mail está indisponível.',
+            'No running mail server detected.': 'Nenhum servidor de e-mail em execução foi detectado.',
+            'Detected mail server:': 'Servidor de e-mail detectado:',
+            'Email folders detected:': 'Pastas de e-mail detectadas:',
+            'No email folders found on this host.': 'Nenhuma pasta de e-mail encontrada neste host.',
+            'Monitor detected email folders (e.g. /var/mail, /var/vmail)':
+                'Monitorar pastas de e-mail detectadas (ex.: /var/mail, /var/vmail)',
+            'Email folder monitoring updated': 'Monitoramento de pastas de e-mail atualizado',
+            'maildirs': 'pastas de e-mail',
             'Detected web server:': 'Servidor web detectado:',
             'Document roots detected:': 'Document roots detectados:',
             'No document roots found in the server configuration.': 'Nenhum document root encontrado na configuração do servidor.',
@@ -309,6 +572,20 @@
             'Monitoring of detected document roots (e.g. public_html) enabled': 'Monitoramento dos document roots detectados (ex.: public_html) habilitado',
             'Monitoring of detected document roots (e.g. public_html) disabled': 'Monitoramento dos document roots detectados (ex.: public_html) desabilitado',
             'Web server monitoring updated': 'Monitoramento do servidor web atualizado',
+            'Monitored folders': 'Pastas monitoradas',
+            'Choose folder': 'Escolher pasta',
+            'Add folder': 'Adicionar pasta',
+            'Save folders': 'Salvar pastas',
+            'Remove': 'Remover',
+            'Folder path (e.g. /var/www/html)': 'Caminho da pasta (ex.: /var/www/html)',
+            'These folders are added to the monitored paths (monitor_paths.extra). Absolute paths must exist on the server. Changes take effect after Reload.':
+                'Estas pastas são adicionadas aos caminhos monitorados (monitor_paths.extra). Os caminhos absolutos precisam existir no servidor. As alterações entram em vigor após Recarregar.',
+            'No extra folders configured. Use the field above to add folders to real-time monitoring.':
+                'Nenhuma pasta extra configurada. Use o campo acima para adicionar pastas ao monitoramento em tempo real.',
+            'Enter a folder path to add.': 'Informe um caminho de pasta para adicionar.',
+            'Absolute path required (e.g. /var/www).': 'É necessário um caminho absoluto (ex.: /var/www).',
+            'Folder already in the list.': 'A pasta já está na lista.',
+            'Monitored folders saved': 'Pastas monitoradas salvas',
             'Quarantined Files': 'Arquivos em quarentena',
             'No files in quarantine.': 'Nenhum arquivo em quarentena.',
             'Details': 'Detalhes',
@@ -381,9 +658,141 @@
             'Stopped': 'Parado', 'Resume': 'Retomar', 'Discard': 'Descartar',
             'Resuming...': 'Retomando...', 'Discarding...': 'Descartando...',
             'Resource Usage': 'Uso de recursos', 'RAM': 'RAM',
+            'Current date and time': 'Data e hora atuais',
+            'Good morning': 'Bom dia',
+            'Good afternoon': 'Boa tarde',
+            'Good evening': 'Boa noite',
+            'Latest scan report': 'Relatório de scan mais recente',
+            'Monitoring overview': 'Resumo do monitoramento',
+            'Latest monitored activity': 'Atividade monitorada mais recente',
+            'Web server monitoring': 'Monitoramento do servidor web',
+            'Email folder monitoring': 'Monitoramento de pastas de e-mail',
+            'Extra monitored folders': 'Pastas extras monitoradas',
+            'Scope: ': 'Escopo: ',
+            'All folders (recursive)': 'Todas as pastas (recursivo)',
+            'Web folders only': 'Somente pastas web',
+            'Custom paths': 'Caminhos personalizados',
+            'Maintenance tasks': 'Tarefas de manutenção',
+            'Run routine cleanup or remove Maldet data.': 'Execute a limpeza de rotina ou remova dados do Maldet.',
+            'Service and server': 'Serviço e servidor',
+            'Restart the WebGUI or reboot the entire server.': 'Reinicie a WebGUI ou todo o servidor.',
+            'No scan reports found.': 'Nenhum relatório de scan encontrado.',
+            'Unable to load scan reports.': 'Não foi possível carregar os relatórios de scan.',
             'Waiting for data...': 'Aguardando dados...', 'Live': 'Ao vivo',
+            'Host overview': 'Visão geral do host', 'System resources': 'Recursos do sistema',
+            'Disk': 'Disco', 'Unavailable': 'Indisponível', 'used': 'usados',
+            'free': 'livres', 'available': 'disponíveis', 'of': 'de',
+            'Host and runtime': 'Host e ambiente', 'Hostname': 'Nome do host',
+            'Operating system': 'Sistema operacional', 'Architecture': 'Arquitetura',
+            'Processor': 'Processador', 'Python version': 'Versão do Python',
+            'CPU cores': 'Núcleos de CPU', 'Install path': 'Caminho de instalação',
+            'Log directory': 'Diretório de logs', 'Maldet binary': 'Binário do Maldet',
+            'ClamAV': 'ClamAV', 'Available': 'Disponível', 'Missing': 'Ausente',
+            'Found': 'Encontrado', 'No binaries reported': 'Nenhum binário informado',
+            'Installer path': 'Caminho do instalador', 'GUI privileges': 'Privilégios da GUI',
+            'Root': 'Root', 'Unprivileged': 'Sem privilégios',
+            'Installer directory': 'Diretório do instalador',
+            'Effective UID': 'UID efetivo', 'Monitor PIDs': 'PIDs do monitor',
+            'Reboot system': 'Reiniciar sistema', 'Reboot': 'Reiniciar',
+            'Reboot Server': 'Reiniciar servidor', 'Reload WebGUI': 'Recarregar WebGUI',
+            'Open menu': 'Abrir menu', 'Settings': 'Configurações',
+            'Refresh': 'Atualizar', 'Language': 'Idioma',
+            'Reboot the entire server in one minute? Active scans and connections will be interrupted.':
+                'Reiniciar todo o servidor em um minuto? Verificações ativas e conexões serão interrompidas.',
+            'System reboot scheduled': 'Reinicialização do sistema agendada',
+            'The server will restart in': 'O servidor será reiniciado em',
+            'Restarting now...': 'Reiniciando agora...',
+            'Active scans and connections will be interrupted.':
+                'Verificações ativas e conexões serão interrompidas.',
+            'WebGUI restart scheduled': 'Reinicialização da WebGUI agendada',
+            'The WebGUI will restart in': 'A WebGUI será reiniciada em',
+            'The page reconnects automatically when the service is back.':
+                'A página será reconectada automaticamente quando o serviço voltar.',
+            'Restart the WebGUI service in 10 seconds? The page will reconnect automatically.':
+                'Reiniciar o serviço da WebGUI em 10 segundos? A página será reconectada automaticamente.',
             'No detections in this scan': 'Nenhuma detecção neste scan',
             'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
+            'Scan details': 'Detalhes da verificação',
+            'Scan report': 'Relatório da verificação',
+            'Infection details': 'Detalhes da infecção',
+            'Open menu': 'Abrir menu',
+            'Error: ': 'Erro: ',
+            'Scan form not loaded yet - please wait and try again':
+                'O formulário de verificação ainda não carregou. Aguarde e tente novamente.',
+            'Enter a scan path before starting': 'Informe o caminho da verificação antes de iniciá-la.',
+            'Recent scans require at least 1 day': 'Verificações recentes exigem pelo menos 1 dia.',
+            'Preparing scan...': 'Preparando a verificação...',
+            'Scan complete - hits found!': 'Verificação concluída — ameaças encontradas!',
+            'Scan complete - no malware': 'Verificação concluída — nenhum malware encontrado.',
+            'Scan started in background': 'Verificação iniciada em segundo plano.',
+            'Scan started': 'Verificação iniciada.',
+            'Discard the checkpoint for scan ': 'Descartar o ponto de retomada do scan ',
+            '? This cannot be undone and the scan will no longer be resumable.':
+                '? Esta ação não pode ser desfeita e o scan não poderá mais ser retomado.',
+            'Stop scan ': 'Parar o scan ',
+            'Restore ': 'Restaurar ',
+            'Try to clean ': 'Tentar limpar ',
+            'Permanently delete ': 'Excluir permanentemente ',
+            ' from quarantine?': ' da quarentena?',
+            'This cannot be undone — the file will NOT be restored.':
+                'Esta ação não pode ser desfeita — o arquivo NÃO será restaurado.',
+            'The file is restored to its original location, cleaned with the matching maldet clean rule and rescanned. If cleaning fails, it is moved back to quarantine.':
+                'O arquivo será restaurado ao local original, limpo com a regra correspondente do Maldet e verificado novamente. Se a limpeza falhar, ele voltará para a quarentena.',
+            'File restored successfully': 'Arquivo restaurado com sucesso.',
+            'Restore failed: ': 'Falha ao restaurar: ',
+            'File cleaned successfully (restored to original path)':
+                'Arquivo limpo com sucesso e restaurado ao caminho original.',
+            'Clean attempted; no clean rule matched or cleaning failed — file remains in quarantine. Check the output: ':
+                'A limpeza foi tentada, mas nenhuma regra correspondente foi encontrada ou ocorreu uma falha. O arquivo permanece em quarentena. Verifique a saída: ',
+            'Clean failed: ': 'Falha ao limpar: ',
+            'Quarantined file deleted': 'Arquivo excluído da quarentena.',
+            'Delete failed: ': 'Falha ao excluir: ',
+            'Restored ': 'Restaurados: ',
+            '; failed: ': '; falhas: ',
+            'All quarantined files restored (': 'Todos os arquivos em quarentena foram restaurados (',
+            'Restore all failed: ': 'Falha ao restaurar todos os arquivos: ',
+            'No log entries found.': 'Nenhuma entrada de log encontrada.',
+            'Scan form not loaded yet - please wait and try again': 'O formulário ainda não carregou. Aguarde e tente novamente.',
+            'Enter a schedule name': 'Informe o nome do agendamento.',
+            'Enter a scan path': 'Informe o caminho da verificação.',
+            'Monitor is already running': 'O monitor já está em execução.',
+            'Monitor started': 'Monitor iniciado.',
+            'Monitor stopped': 'Monitor parado.',
+            'Monitor reloaded': 'Monitor recarregado.',
+            'Stopping monitor... (may take up to 2 minutes)':
+                'Parando o monitor... (isso pode levar até 2 minutos)',
+            'Starting monitor...': 'Iniciando o monitor...',
+            'Timed out waiting for the monitor to start':
+                'Tempo limite excedido ao aguardar o início do monitor.',
+            'Timed out waiting for the monitor to stop':
+                'Tempo limite excedido ao aguardar a parada do monitor.',
+            'User selection saved; reload the monitor':
+                'Seleção de usuários salva; recarregue o monitor.',
+            'Web server monitoring updated': 'Monitoramento do servidor web atualizado.',
+            'Email folder monitoring updated': 'Monitoramento das pastas de e-mail atualizado.',
+            'Monitor scope saved': 'Escopo do monitoramento salvo.',
+            'Enter a folder path to add.': 'Informe o caminho da pasta que deseja adicionar.',
+            'Absolute path required (e.g. /var/www).': 'Informe um caminho absoluto (ex.: /var/www).',
+            'Folder already in the list.': 'A pasta já está na lista.',
+            'Monitored folders saved': 'Pastas monitoradas salvas.',
+            'New password must contain at least 8 characters':
+                'A nova senha deve ter pelo menos 8 caracteres.',
+            'New passwords do not match': 'As novas senhas não coincidem.',
+            'Password changed successfully': 'Senha alterada com sucesso.',
+            'Password change failed: ': 'Falha ao alterar a senha: ',
+            'No configuration changes to save': 'Não há alterações de configuração para salvar.',
+            'Saved ': 'Salvas: ',
+            ' configuration change(s)': ' alteração(ões) de configuração.',
+            'Configuration save failed: ': 'Falha ao salvar a configuração: ',
+            'Alert sent successfully': 'Alerta enviado com sucesso.',
+            'Alert failed: ': 'Falha ao enviar o alerta: ',
+            'Maintenance complete': 'Manutenção concluída.',
+            'Purge complete': 'Limpeza concluída.',
+            'Clear all logs, quarantine, and temp data?':
+                'Limpar todos os logs, a quarentena e os dados temporários?',
+            'No output returned by maldet.': 'O Maldet não retornou nenhuma saída.',
+            'Error loading details: ': 'Erro ao carregar os detalhes: ',
+            'Error loading report: ': 'Erro ao carregar o relatório: ',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
             'Deleting...': 'Excluindo...', 'Restoring all...': 'Restaurando tudo...',
             'Quarantining...': 'Colocando em quarentena...', 'Quarantine': 'Quarentenar',
@@ -403,7 +812,13 @@
         }
     };
     function tr(text) {
-        return I18N.lang === 'pt-BR' ? (I18N.pt[text] || text) : text;
+        if (I18N.lang !== 'pt-BR') return text;
+        if (I18N.pt[text]) return I18N.pt[text];
+        var keys = Object.keys(I18N.pt).filter(function(key) {
+            return key.length > 0 && key.charAt(key.length - 1) === ' ' &&
+                text.indexOf(key) === 0;
+        }).sort(function(a, b) { return b.length - a.length; });
+        return keys.length ? I18N.pt[keys[0]] + text.slice(keys[0].length) : text;
     }
     function translateDom(root) {
         if (I18N.lang !== 'pt-BR') return;
@@ -515,6 +930,10 @@
             translateDom(content);
             content.scrollTop = scroll;
             _lastPageHtml = html;
+            if (name === 'maintenance') {
+                initReloadGuiButton();
+                initRebootButton();
+            }
             if (name === 'dashboard') refreshDashboardUsage();
         }).catch(function() {
             // Silent: transient polling errors must not replace the page.
@@ -537,6 +956,7 @@
     var Router = {
         currentPage: 'dashboard',
         routes: {},
+        initialized: false,
         register: function(name, fn) { this.routes[name] = fn; },
         navigate: function(name) {
             if (this.currentPage === 'scan-management' && name !== 'scan-management') {
@@ -573,6 +993,10 @@
                 Promise.resolve(this.routes[name]()).then(function(html) {
                     content.innerHTML = html;
                     translateDom(content);
+                    if (name === 'maintenance') {
+                        initReloadGuiButton();
+                        initRebootButton();
+                    }
                     if (name === 'scan-management') startScanManagementRefresh();
                     if (name === 'monitoring') startMonitorActivityRefresh();
                     if (name === 'dashboard') startDashboardRefresh();
@@ -586,6 +1010,8 @@
             }
         },
         init: function() {
+            if (this.initialized) return;
+            this.initialized = true;
             var self = this;
             document.getElementById('sidebar-nav').addEventListener('click', function(e) {
                 var item = e.target.closest('.nav-item');
@@ -621,9 +1047,18 @@
                     self.navigate('config');
                 });
             }
+            initRebootButton();
+            initReloadGuiButton();
             document.addEventListener('input', markPageDirty, true);
             document.addEventListener('change', markPageDirty, true);
             document.addEventListener('click', markPageDirty, true);
+            // Pressing Enter in the monitored-folder field adds it to the list.
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && e.target && e.target.id === 'monitor-path-input') {
+                    e.preventDefault();
+                    addMonitorPath();
+                }
+            });
             // Delegated click handler for all dynamically rendered buttons/tabs.
             // Uses data-action attributes (CSP-safe, no inline onclick needed).
             document.addEventListener('click', function(e) {
@@ -631,7 +1066,7 @@
                 if (!el) return;
                 var action = el.getAttribute('data-action');
                 if (action === 'start-scan') startScan();
-                else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'));
+                else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'), el.getAttribute('data-title'));
                 else if (action === 'scan-details') openScanDetails(el.getAttribute('data-id'));
                 else if (action === 'scan-details-close') closeScanDetails();
                 else if (action === 'report-details') openReportDetails(el.getAttribute('data-id'));
@@ -656,6 +1091,10 @@
                 else if (action === 'monitor-save-users') saveMonitorUsers();
                 else if (action === 'monitor-save-scope') saveMonitorScope();
                 else if (action === 'monitor-save-webserver') saveMonitorWebserver();
+                else if (action === 'monitor-save-mail') saveMonitorMail();
+                else if (action === 'monitor-add-path') addMonitorPath();
+                else if (action === 'monitor-remove-path') removeMonitorPath(el.getAttribute('data-path'));
+                else if (action === 'monitor-save-paths') saveMonitorPaths();
                 else if (action === 'update-ver') updateVer(false);
                 else if (action === 'update-ver-beta') updateVer(true);
                 else if (action === 'update-clamav') updateClamAv();
@@ -701,20 +1140,17 @@
 
     // ----- Dashboard -----
     // ----- Dashboard resource gauges (CPU/RAM, live) -----
-    var GAUGE_CIRCUMFERENCE = 2 * Math.PI * 45;
     var _dashboardUsageTimer = null;
+    var _dashboardClockTimer = null;
 
     function buildGaugeHtml(metric, label) {
         return '<div class="gauge-item">' +
             '<div class="gauge" data-gauge="' + metric + '">' +
-            '<svg class="gauge-svg" viewBox="0 0 100 100">' +
-            '<circle class="gauge-track" cx="50" cy="50" r="45"></circle>' +
-            '<circle class="gauge-value" cx="50" cy="50" r="45" ' +
-            'style="stroke-dasharray:' + GAUGE_CIRCUMFERENCE.toFixed(2) + ';stroke-dashoffset:' + GAUGE_CIRCUMFERENCE.toFixed(2) + ';"></circle>' +
-            '</svg>' +
-            '<div class="gauge-center"><span class="gauge-percent">--</span><span class="gauge-percent-sign">%</span></div>' +
+            '<div class="gauge-heading"><span class="gauge-label">' + escapeHtml(label) + '</span>' +
+            '<span class="gauge-percent">--%</span></div>' +
+            '<div class="gauge-track" role="progressbar" aria-label="' + escapeHtml(label) +
+            '" aria-valuemin="0" aria-valuemax="100"><div class="gauge-value"></div></div>' +
             '</div>' +
-            '<div class="gauge-label">' + escapeHtml(label) + '</div>' +
             '<div class="gauge-sub" data-gauge-sub="' + metric + '">' + tr('Waiting for data...') + '</div>' +
             '</div>';
     }
@@ -722,20 +1158,24 @@
     function setGaugeValue(metric, percent) {
         var container = document.querySelector('[data-gauge="' + metric + '"]');
         if (!container) return;
-        var circle = container.querySelector('.gauge-value');
+        var bar = container.querySelector('.gauge-value');
+        var track = container.querySelector('.gauge-track');
         var text = container.querySelector('.gauge-percent');
         if (percent === null || percent === undefined || isNaN(percent)) {
-            if (text) text.textContent = '--';
+            if (text) text.textContent = '--%';
+            if (bar) bar.style.width = '0%';
+            if (track) track.removeAttribute('aria-valuenow');
             return;
         }
         var pct = Math.max(0, Math.min(100, percent));
-        if (circle) {
-            circle.style.strokeDashoffset = (GAUGE_CIRCUMFERENCE * (1 - pct / 100)).toFixed(2);
-            circle.classList.remove('warning', 'danger');
-            if (pct >= 85) circle.classList.add('danger');
-            else if (pct >= 60) circle.classList.add('warning');
+        if (bar) {
+            bar.style.width = pct + '%';
+            bar.classList.remove('warning', 'danger');
+            if (pct >= 85) bar.classList.add('danger');
+            else if (pct >= 60) bar.classList.add('warning');
         }
-        if (text) text.textContent = Math.round(pct);
+        if (track) track.setAttribute('aria-valuenow', String(Math.round(pct)));
+        if (text) text.textContent = Math.round(pct) + '%';
     }
 
     function formatMb(mb) {
@@ -767,25 +1207,144 @@
         stopDashboardRefresh();
         refreshDashboardUsage();
         _dashboardUsageTimer = setInterval(refreshDashboardUsage, 3000);
+        updateDashboardClock();
+        _dashboardClockTimer = setInterval(updateDashboardClock, 1000);
+    }
+
+    function updateDashboardClock() {
+        var clock = document.getElementById('dashboard-clock');
+        if (!clock) return;
+        var now = new Date();
+        var hour = now.getHours();
+        var greeting = hour >= 5 && hour < 12 ? tr('Good morning') :
+            hour >= 12 && hour < 18 ? tr('Good afternoon') : tr('Good evening');
+        var greetingNode = document.getElementById('dashboard-greeting');
+        if (greetingNode) greetingNode.textContent = greeting;
+        clock.textContent = now.toLocaleString(
+            I18N.lang === 'pt-BR' ? 'pt-BR' : undefined,
+            { dateStyle: 'full', timeStyle: 'medium' }
+        );
     }
 
     function stopDashboardRefresh() {
         if (_dashboardUsageTimer) { clearInterval(_dashboardUsageTimer); _dashboardUsageTimer = null; }
+        if (_dashboardClockTimer) { clearInterval(_dashboardClockTimer); _dashboardClockTimer = null; }
     }
 
     function renderDashboard() {
-        return API.get('/system').then(function(data) {
-            var sys = data.system;
+        return Promise.all([
+            API.get('/system'),
+            API.get('/scans').catch(function() { return { reports: null }; }),
+            API.get('/monitor/activity?lines=1').catch(function() { return null; }),
+            API.get('/monitor/users').catch(function() { return null; }),
+            API.get('/monitor/webserver').catch(function() { return null; }),
+            API.get('/monitor/mail').catch(function() { return null; }),
+            API.get('/monitor/paths').catch(function() { return null; }),
+            API.get('/monitor/scope').catch(function() { return null; })
+        ]).then(function(results) {
+            var sys = results[0].system;
+            var reports = Array.isArray(results[1].reports) ? results[1].reports.slice() : null;
+            var monitorActivity = results[2];
+            var monitorUsers = results[3];
+            var monitorWeb = results[4];
+            var monitorMail = results[5];
+            var monitorPaths = results[6];
+            var monitorScope = results[7];
+            if (reports) reports.sort(function(a, b) {
+                return (Number(b.completed_epoch || b.started_epoch) || 0) -
+                    (Number(a.completed_epoch || a.started_epoch) || 0);
+            });
+            var latestReport = reports && reports.length ? reports[0] : null;
             var h = '';
+            h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' + tr('Current date and time') + '</span></div>';
+            h += '<div id="dashboard-greeting" class="dashboard-greeting"></div>';
+            h += '<div id="dashboard-clock" class="stat-value" style="padding:8px 14px;">--</div></div>';
+            h += '<div class="grid grid-4" style="margin-bottom:20px;">';
+            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.version || 'unknown') + '</div><div class="stat-label">' + tr('Maldet Version') + '</div></div>';
+            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.signature_version || '?') + '</div><div class="stat-label">' + tr('Signature Set') + '</div></div>';
+            h += '<div class="stat ' + (sys.clamav_available ? 'success' : 'danger') + '"><div class="stat-value">' + escapeHtml(sys.clamav_version || '?') + '</div><div class="stat-label">' + tr('ClamAV Status') + '</div></div>';
+            h += '<div class="stat success"><div class="stat-value">' + (sys.active_scans ? sys.active_scans.length : 0) + '</div><div class="stat-label">' + tr('Active Scans') + '</div></div>';
+            h += '<div class="stat ' + (sys.monitor_running ? 'success' : 'danger') + '"><div class="stat-value">' + (sys.monitor_running ? tr('ONLINE') : tr('OFFLINE')) + '</div><div class="stat-label">' + tr('Monitor') + '</div></div>';
+            h += '</div>';
             h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' + tr('Resource Usage') + '</span></div>';
             h += '<div class="gauge-row">' + buildGaugeHtml('cpu', tr('CPU')) + buildGaugeHtml('ram', tr('RAM')) + '</div>';
             h += '</div>';
-            h += '<div class="grid grid-4" style="margin-bottom:20px;">';
-            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.version || 'unknown') + '</div><div class="stat-label">Maldet Version</div></div>';
-            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.signature_version || '?') + '</div><div class="stat-label">Signature Set</div></div>';
-            h += '<div class="stat ' + (sys.clamav_available ? 'success' : 'danger') + '"><div class="stat-value">' + escapeHtml(sys.clamav_version || '?') + '</div><div class="stat-label">ClamAV Status</div></div>';
-            h += '<div class="stat success"><div class="stat-value">' + (sys.active_scans ? sys.active_scans.length : 0) + '</div><div class="stat-label">Active Scans</div></div>';
-            h += '<div class="stat ' + (sys.monitor_running ? 'success' : 'danger') + '"><div class="stat-value">' + (sys.monitor_running ? 'ONLINE' : 'OFFLINE') + '</div><div class="stat-label">Monitor</div></div>';
+            h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' +
+                tr('Monitoring overview') + '</span></div>';
+            h += '<div class="grid grid-2"><div><strong>' + tr('Monitoring status') + '</strong><br>' +
+                '<span class="monitor-state ' + (sys.monitor_running ? 'is-running' : 'is-stopped') + '">' +
+                tr(sys.monitor_running ? 'RUNNING' : 'STOPPED') + '</span></div>';
+            h += '<div><strong>' + tr('events logged') + '</strong><br>' +
+                (monitorActivity && Number.isFinite(Number(monitorActivity.total_events))
+                    ? Number(monitorActivity.total_events) : tr('Unavailable')) + '</div></div>';
+            var scopeAllowsExtras = !monitorScope || monitorScope.scope !== 'webroots';
+            function monitorSettingLabel(enabled, available) {
+                if (!available) return tr('Unavailable');
+                return tr(enabled && sys.monitor_running ? 'Enabled' : 'Disabled');
+            }
+            h += '<div class="grid grid-2 monitoring-summary-settings">';
+            var scopeLabels = {
+                recursive: tr('All folders (recursive)'),
+                webroots: tr('Web folders only'),
+                custom: tr('Custom paths')
+            };
+            h += '<div><strong>' + tr('Users monitored') + '</strong><br>' +
+                '<span>' + monitorSettingLabel(
+                    !!(monitorUsers && Array.isArray(monitorUsers.users) &&
+                        monitorUsers.users.some(function(user) { return user.enabled; })),
+                    !!monitorUsers) + '</span>' +
+                (monitorScope && scopeLabels[monitorScope.scope]
+                    ? '<br><small class="form-help">' + tr('Scope: ') +
+                        escapeHtml(scopeLabels[monitorScope.scope]) + '</small>'
+                    : '') + '</div>';
+            h += '<div><strong>' + tr('Web server monitoring') + '</strong><br>' +
+                '<span>' + monitorSettingLabel(
+                    !!(monitorWeb && monitorWeb.autodetect === '1' && scopeAllowsExtras),
+                    !!monitorWeb && typeof monitorWeb.autodetect !== 'undefined') + '</span></div>';
+            h += '<div><strong>' + tr('Email folder monitoring') + '</strong><br>' +
+                '<span>' + monitorSettingLabel(
+                    !!(monitorMail && monitorMail.autodetect === '1' && scopeAllowsExtras),
+                    !!monitorMail && typeof monitorMail.autodetect !== 'undefined') + '</span></div>';
+            h += '<div><strong>' + tr('Extra monitored folders') + '</strong><br>' +
+                '<span>' + monitorSettingLabel(
+                    !!(monitorPaths && Array.isArray(monitorPaths.paths) &&
+                        monitorPaths.paths.length && scopeAllowsExtras),
+                    !!monitorPaths) + '</span>' +
+                (monitorPaths && Array.isArray(monitorPaths.paths)
+                    ? '<br><small class="form-help">' + monitorPaths.paths.length + '</small>'
+                    : '') + '</div></div>';
+            if (monitorActivity && Array.isArray(monitorActivity.entries) && monitorActivity.entries.length) {
+                var latestEvent = monitorActivity.entries[0];
+                h += '<p class="form-help">' + tr('Latest monitored activity') + ': <code>' +
+                    escapeHtml(latestEvent.file || '-') + '</code> ' +
+                    escapeHtml(latestEvent.event || '') + ' ' + escapeHtml(latestEvent.time || '') + '</p>';
+            }
+            h += '</div>';
+            h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' +
+                tr('Latest scan report') + '</span></div>';
+            if (reports === null) {
+                h += '<p style="padding:12px;color:var(--text-muted);">' + tr('Unable to load scan reports.') + '</p>';
+            } else if (!latestReport) {
+                h += '<p style="padding:12px;color:var(--text-muted);">' + tr('No scan reports found.') + '</p>';
+            } else {
+                var latestHits = Number(latestReport.total_hits);
+                if (!Number.isFinite(latestHits)) latestHits =
+                    Array.isArray(latestReport.hits) ? latestReport.hits.length : 0;
+                h += '<div class="grid grid-3"><div><strong>' + tr('Scan ID') + '</strong><br><code>' +
+                    escapeHtml(latestReport.scan_id || '-') + '</code></div>';
+                h += '<div><strong>' + tr('Path') + '</strong><br>' +
+                    escapeHtml(latestReport.path || '-') + '</div>';
+                h += '<div><strong>' + tr('Completed') + '</strong><br>' +
+                    escapeHtml(latestReport.completed ||
+                        (latestReport.completed_epoch ? fmtTime(latestReport.completed_epoch) : '-')) + '</div>';
+                h += '<div><strong>' + tr('Duration') + '</strong><br>' +
+                    escapeHtml(fmtDuration(latestReport.elapsed_seconds)) + '</div>';
+                h += '<div><strong>' + tr('Files') + '</strong><br>' +
+                    (Number(latestReport.total_files) || 0) + '</div>';
+                h += '<div><strong>' + tr('Hits') + '</strong><br>' + latestHits + '</div>';
+                h += '<div><strong>' + tr('Quarantined') + '</strong><br>' +
+                    (Number(latestReport.total_quarantined) || 0) + '</div></div>';
+            }
             h += '</div>';
             h += '<div class="card"><div class="card-header"><span class="card-title">System Information</span></div>';
             h += '<div class="grid grid-2"><div><table>';
@@ -891,7 +1450,11 @@
             input.dispatchEvent(new Event('input', { bubbles: true }));
             if (_folderPickerTargetId === 'scan_path') updateScanSummary();
         }
+        var targetId = _folderPickerTargetId;
         closeFolderPicker();
+        // In the monitored-folders card the picker doubles as a shortcut for
+        // the "Add folder" button, so queue the chosen folder right away.
+        if (targetId === 'monitor-path-input') addMonitorPath();
     }
 
     function browseFolder(path) {
@@ -920,13 +1483,13 @@
         });
     }
 
-    function openFolderPicker(targetId) {
+    function openFolderPicker(targetId, title) {
         _folderPickerTargetId = targetId || 'scan_path';
         closeFolderPicker();
         var modal = document.createElement('div');
         modal.id = 'folder-picker-modal';
         modal.className = 'modal-backdrop';
-        modal.innerHTML = '<div class="modal"><div class="modal-header"><span class="modal-title">Choose scan folder</span>' +
+        modal.innerHTML = '<div class="modal"><div class="modal-header"><span class="modal-title">' + tr(title || 'Choose scan folder') + '</span>' +
             '<button class="modal-close" data-action="folder-close">×</button></div><div class="modal-body">' +
             '<div class="folder-current" id="folder-picker-path">Loading...</div><div id="folder-picker-body" class="folder-list"></div></div>' +
             '<div class="modal-footer"><button class="btn btn-ghost" data-action="folder-close">Cancel</button>' +
@@ -1005,7 +1568,9 @@
         }, 500);
         _scanPreparing = true;
         _scanStartInFlight = true;
-        API.post('/scan', body).then(function(resp) {
+        // The backend may spend up to 60 seconds validating active scans and
+        // starting Maldet; keep the request alive long enough for that work.
+        API.post('/scan', body, { timeout: 70000 }).then(function(resp) {
             _scanPreparing = false;
             _scanStartInFlight = false;
             if (resp.scan_started) {
@@ -1243,7 +1808,7 @@
     }
 
     function restoreQuarantineFile(filename) {
-        if (!filename || !confirm('Restore ' + filename + '?')) return;
+        if (!filename || !confirm(tr('Restore ') + filename + '?')) return;
         var button = null;
         document.querySelectorAll('[data-action="quarantine-restore"]').forEach(function(candidate) {
             if (candidate.getAttribute('data-file') === filename) button = candidate;
@@ -1268,7 +1833,8 @@
     }
 
     function cleanQuarantineFile(filename) {
-        if (!filename || !confirm('Try to clean ' + filename + '?\n\nThe file is restored to its original location, cleaned with the matching maldet clean rule and rescanned. If cleaning fails, it is moved back to quarantine.')) return;
+        if (!filename || !confirm(tr('Try to clean ') + filename + '?\n\n' +
+                tr('The file is restored to its original location, cleaned with the matching maldet clean rule and rescanned. If cleaning fails, it is moved back to quarantine.'))) return;
         var button = null;
         document.querySelectorAll('[data-action="quarantine-clean"]').forEach(function(candidate) {
             if (candidate.getAttribute('data-file') === filename) button = candidate;
@@ -1298,7 +1864,8 @@
     }
 
     function deleteQuarantineFile(filename) {
-        if (!filename || !confirm('Permanently delete ' + filename + ' from quarantine?\n\nThis cannot be undone — the file will NOT be restored.')) return;
+        if (!filename || !confirm(tr('Permanently delete ') + filename + tr(' from quarantine?') +
+                '\n\n' + tr('This cannot be undone — the file will NOT be restored.'))) return;
         var button = null;
         document.querySelectorAll('[data-action="quarantine-delete"]').forEach(function(candidate) {
             if (candidate.getAttribute('data-file') === filename) button = candidate;
@@ -1321,16 +1888,45 @@
 
     function restoreAllQuarantineFiles() {
         var buttons = document.querySelectorAll('[data-action="quarantine-restore-all"]');
-        if (!buttons.length || !confirm('Restore all quarantined files?')) return;
+        if (!buttons.length || !confirm(tr('Restore all quarantined files?'))) return;
+        var filenames = Array.prototype.map.call(
+            document.querySelectorAll('[data-action="quarantine-restore"]'),
+            function(button) { return button.getAttribute('data-file'); }
+        ).filter(function(filename) { return !!filename; });
+        var restored = 0;
+        var failures = [];
         buttons.forEach(function(button) {
             button.disabled = true;
-            button.textContent = 'Restoring all...';
+            button.textContent = 'Restoring 0/' + filenames.length + '...';
         });
-        API.post('/quarantine/restore-all', {}).then(function(data) {
-            if (data.failed) {
-                toast('Restored ' + data.restored + '; failed: ' + data.failed, 'error');
+
+        filenames.reduce(function(queue, filename, index) {
+            return queue.then(function() {
+                buttons.forEach(function(button) {
+                    button.textContent = 'Restoring ' + (index + 1) + '/' + filenames.length + '...';
+                });
+                return API.post('/quarantine/restore', { file: filename }, { timeout: 40000 })
+                    .then(function(data) {
+                        if (data.returncode !== undefined &&
+                                data.returncode !== 0 && data.returncode !== 2) {
+                            throw new Error(data.stderr || data.stdout || 'Restore failed');
+                        }
+                        restored++;
+                    })
+                    .catch(function(err) {
+                        failures.push({ file: filename, error: err.message });
+                    });
+            });
+        }, Promise.resolve()).then(function() {
+            if (failures.length) {
+                var failedNames = failures.slice(0, 5).map(function(item) {
+                    return item.file;
+                }).join(', ');
+                var suffix = failures.length > 5 ? ', ...' : '';
+                toast('Restored ' + restored + '; failed: ' + failures.length +
+                    ' (' + failedNames + suffix + ')', 'error', 12000);
             } else {
-                toast('All quarantined files restored (' + data.restored + ')', 'success');
+                toast('All quarantined files restored (' + restored + ')', 'success');
             }
             Router.navigate('quarantine');
         }).catch(function(err) {
@@ -1468,7 +2064,8 @@
         }
         var labels = SCAN_ACTION_LABELS[action] || { idle: 'Retry', working: 'Working...' };
         if ((action === 'quarantine' || action === 'restore') &&
-            !confirm((action === 'quarantine' ? 'Quarantine' : 'Restore') + ' all detected files from scan ' + id + '?')) {
+            !confirm(tr((action === 'quarantine' ? 'Quarantine' : 'Restore') +
+                ' all detected files from scan ') + id + '?')) {
             return;
         }
         if (button) {
@@ -1503,12 +2100,13 @@
     }
 
     function discardScan(id) {
-        if (!confirm('Discard the checkpoint for scan ' + id + '? This cannot be undone and the scan will no longer be resumable.')) return;
+        if (!confirm(tr('Discard the checkpoint for scan ') + id +
+                tr('? This cannot be undone and the scan will no longer be resumable.'))) return;
         scanAction(id, 'kill');
     }
 
     function stopScan(id) {
-        if (!confirm('Stop scan ' + id + '?')) return;
+        if (!confirm(tr('Stop scan ') + id + '?')) return;
         scanAction(id, 'stop');
     }
 
@@ -1636,7 +2234,7 @@
     function openScheduleModal(id) {
         closeScheduleModal();
         var existing = id ? _schedulesCache[id] : null;
-        var s = existing || { name: '', path: '/home', scan_type: 'recent', days: 1, frequency: 'daily',
+        var s = existing || { name: '', path: '/home', scan_type: 'all', days: 1, frequency: 'daily',
             hour: 3, minute: 0, weekday: 0, cron_expr: '', enabled: true };
         var modal = document.createElement('div');
         modal.id = 'schedule-modal';
@@ -1652,11 +2250,18 @@
         h += '<div class="form-group"><label class="form-label">' + tr('Path') + '</label><div class="path-picker-row">' +
             '<input type="text" class="form-input" id="sch_path" value="' + escapeHtml(s.path) + '" placeholder="/var/www">' +
             '<button type="button" class="btn btn-ghost" data-action="folder-picker" data-target="sch_path">' + tr('Browse') + '</button></div></div>';
-        h += '<div class="form-group"><label class="form-label">' + tr('Scan type') + '</label>' +
-            '<select class="form-input" id="sch_scan_type"><option value="recent"' + (s.scan_type === 'recent' ? ' selected' : '') + '>' +
-            tr('Recent files only') + '</option><option value="all"' + (s.scan_type === 'all' ? ' selected' : '') + '>' +
-            tr('Full scan (all files)') + '</option></select></div>';
-        h += '<div class="form-group" id="sch_days_group"><label class="form-label">' + tr('Modified within (days)') + '</label>' +
+        h += '<div class="form-group"><label class="form-label">' + tr('Scan type') + '</label>';
+        if (existing) {
+            h += '<select class="form-input" id="sch_scan_type"><option value="recent"' + (s.scan_type === 'recent' ? ' selected' : '') + '>' +
+                tr('Recent files only') + '</option><option value="all"' + (s.scan_type === 'all' ? ' selected' : '') + '>' +
+                tr('Full scan (all files)') + '</option></select>';
+        } else {
+            h += '<input type="hidden" id="sch_scan_type" value="all"><div class="form-input">' +
+                tr('Full scan (all files)') + '</div>';
+        }
+        h += '</div>';
+        h += '<div class="form-group" id="sch_days_group"' + (s.scan_type === 'recent' ? '' : ' style="display:none"') +
+            '><label class="form-label">' + tr('Modified within (days)') + '</label>' +
             '<input type="number" min="1" class="form-input" id="sch_days" value="' + escapeHtml(s.days) + '"></div>';
         h += '<div class="form-group"><label class="form-label">' + tr('Frequency') + '</label>' +
             '<select class="form-input" id="sch_frequency"><option value="daily"' + (s.frequency === 'daily' ? ' selected' : '') + '>' +
@@ -1682,7 +2287,7 @@
             if (!el) return;
             var action = el.getAttribute('data-action');
             if (action === 'schedule-modal-close') closeScheduleModal();
-            else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'));
+            else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'), el.getAttribute('data-title'));
             else if (action === 'schedule-save') saveScheduleForm(el.getAttribute('data-id') || null);
         });
         modal.addEventListener('change', function(e) {
@@ -1777,11 +2382,19 @@
             API.get('/system'), API.get('/monitor/users'),
             // Web server detection is best-effort; never block the page.
             API.get('/monitor/webserver').catch(function() { return {}; }),
+            // Mail folder detection is best-effort; never block the page.
+            API.get('/monitor/mail').catch(function() { return {}; }),
             API.get('/monitor/activity?lines=40').catch(function() { return {}; }),
-            API.get('/monitor/scope')
+            API.get('/monitor/scope'),
+            // Best-effort: an unreadable file must not break the page, and the
+            // card hides its controls so an empty list can never be saved.
+            API.get('/monitor/paths').catch(function(err) {
+                return { error: (err && err.message) || String(err) };
+            })
         ]).then(function(results) {
             var data = results[0], userData = results[1], ws = results[2] || {},
-                act = results[3] || {}, scope = results[4];
+                mail = results[3] || {}, act = results[4] || {},
+                scope = results[5], extra = results[6] || {};
             var sys = data.system;
             var h = '<div class="monitor-grid">';
             h += '<div class="card monitor-status-card"><div class="card-header"><span class="card-title">' + tr('Real-time monitoring (inotify)') + '</span><span class="monitor-badge">' + tr('Inotify') + '</span></div>';
@@ -1851,6 +2464,61 @@
                     (scope.scope === 'webroots' ? ' disabled' : '') + '>' + tr('Save') + '</button>';
             }
             h += '</div></div>';
+            // ---- Email folder detection card ----
+            h += '<div class="card monitor-mail-card"><div class="card-header"><span class="card-title">' + tr('Email folder detection') + '</span><span class="monitor-badge">' + tr('maildirs') + '</span></div>';
+            if (!mail || typeof mail.detected === 'undefined') {
+                h += '<p class="form-help">' + tr('Email folder detection is unavailable.') + '</p>';
+            } else if (!mail.detected) {
+                h += '<p>' + tr('No running mail server detected.') + '</p>';
+            } else {
+                h += '<div class="monitor-status-row"><span>' + tr('Detected mail server:') + '</span><strong>' + escapeHtml(mail.servers.join(', ')) + '</strong></div>';
+                h += '<p>' + tr('Email folders detected:') + '</p><ul class="webserver-docroot-list">';
+                if (!(mail.maildirs || []).length) {
+                    h += '<li class="form-help">' + tr('No email folders found on this host.') + '</li>';
+                } else {
+                    mail.maildirs.forEach(function(md) {
+                        h += '<li>' + escapeHtml(md) + '</li>';
+                    });
+                }
+                h += '</ul>';
+                h += '<label class="checkbox-row"><input type="checkbox" id="monitor-maildir-toggle"' +
+                    (mail.autodetect === '1' ? ' checked' : '') +
+                    (scope.scope === 'webroots' ? ' disabled' : '') + '> ' +
+                    tr('Monitor detected email folders (e.g. /var/mail, /var/vmail)') + '</label>';
+                if (scope.scope === 'webroots') {
+                    h += '<p class="form-help">' +
+                        tr('In webroot-only mode, additional document roots and temporary folders are not watched. Reload to apply changes.') +
+                        '</p>';
+                }
+                h += '<p class="form-help">' + tr('Changes take effect after Reload or restarting the monitor.') + '</p>';
+                h += '<button class="btn btn-primary" data-action="monitor-save-mail"' +
+                    (scope.scope === 'webroots' ? ' disabled' : '') + '>' + tr('Save') + '</button>';
+            }
+            h += '</div></div>';
+            // ---- Monitored folders card (extra paths added to the watch list) ----
+            h += '<div class="card monitor-paths-card"><div class="card-header"><span class="card-title">' + tr('Monitored folders') + '</span></div>';
+            if (extra.error) {
+                // Never render an empty list after a read failure: saving it
+                // would overwrite the existing entries with nothing.
+                h += '<div class="alert alert-warning"><strong>' + tr('Warning:') + '</strong> ' +
+                    escapeHtml(extra.error) + '</div>';
+            } else {
+                h += '<p class="form-help">' +
+                    tr('These folders are added to the monitored paths (monitor_paths.extra). Absolute paths must exist on the server. Changes take effect after Reload.') +
+                    '</p>';
+                if (scope.scope === 'webroots') {
+                    h += '<p class="form-help">' +
+                        tr('In webroot-only mode, additional document roots and temporary folders are not watched. Reload to apply changes.') +
+                        '</p>';
+                }
+                h += '<div class="monitor-path-add"><input type="text" class="form-input" id="monitor-path-input" placeholder="/var/www/html" aria-label="' +
+                    tr('Folder path (e.g. /var/www/html)') + '"><button type="button" class="btn btn-ghost" data-action="folder-picker" data-target="monitor-path-input" data-title="Choose folder">' +
+                    tr('Browse') + '</button><button class="btn btn-primary" data-action="monitor-add-path">' +
+                    tr('Add folder') + '</button></div>';
+                h += '<div class="monitor-path-list" id="monitor-path-list">' + renderMonitorPathList(extra.paths) + '</div>';
+                h += '<button class="btn btn-primary" data-action="monitor-save-paths">' + tr('Save folders') + '</button>';
+            }
+            h += '</div>';
             // ---- Monitor activity card (real-time scanned/changed files) ----
             h += '<div class="card monitor-activity-card"><div class="card-header"><span class="card-title">' + tr('Monitor activity') + '</span>' +
                 '<span class="monitor-badge">' + (act.running ? tr('Live') : tr('STOPPED')) + '</span></div>';
@@ -1884,6 +2552,50 @@
             rows += '<div class="monitor-activity-total form-help">' + escapeHtml(String(act.total_events)) + ' ' + tr('events logged') + '</div>';
         }
         return rows;
+    }
+
+    var _monitorExtraPaths = [];
+    function renderMonitorPathList(paths) {
+        if (paths) _monitorExtraPaths = paths.slice();
+        if (!_monitorExtraPaths.length) {
+            return '<p class="form-help">' +
+                tr('No extra folders configured. Use the field above to add folders to real-time monitoring.') + '</p>';
+        }
+        var rows = '';
+        _monitorExtraPaths.forEach(function(path) {
+            rows += '<div class="monitor-path-row"><code class="monitor-path-value">' + escapeHtml(path) + '</code>' +
+                '<button class="btn btn-danger btn-sm" data-action="monitor-remove-path" data-path="' +
+                escapeHtml(path) + '">' + tr('Remove') + '</button></div>';
+        });
+        return rows;
+    }
+    function addMonitorPath() {
+        var input = document.getElementById('monitor-path-input');
+        if (!input) return;
+        var value = (input.value || '').trim();
+        if (!value) { toast(tr('Enter a folder path to add.'), 'error'); return; }
+        if (value.charAt(0) !== '/') { toast(tr('Absolute path required (e.g. /var/www).'), 'error'); return; }
+        if (value.length > 1) value = value.replace(/\/+$/, '') || '/';
+        if (_monitorExtraPaths.indexOf(value) !== -1) {
+            toast(tr('Folder already in the list.'), 'info');
+            return;
+        }
+        _monitorExtraPaths.push(value);
+        input.value = '';
+        input.focus();
+        var list = document.getElementById('monitor-path-list');
+        if (list) list.innerHTML = renderMonitorPathList();
+    }
+    function removeMonitorPath(path) {
+        _monitorExtraPaths = _monitorExtraPaths.filter(function(item) { return item !== path; });
+        var list = document.getElementById('monitor-path-list');
+        if (list) list.innerHTML = renderMonitorPathList();
+    }
+    function saveMonitorPaths() {
+        API.put('/monitor/paths', { paths: _monitorExtraPaths }).then(function(data) {
+            toast((data && data.message) || tr('Monitored folders saved'), 'success');
+            Router.navigate('monitoring');
+        }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
     }
 
     var _monitorActivityTimer = null;
@@ -1982,6 +2694,13 @@
         if (!toggle || toggle.disabled) return;
         API.post('/monitor/webserver', { enabled: !!toggle.checked }).then(function(data) {
             toast((data && data.message) || 'Web server monitoring updated', 'success');
+        }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
+    }
+    function saveMonitorMail() {
+        var toggle = document.getElementById('monitor-maildir-toggle');
+        if (!toggle || toggle.disabled) return;
+        API.post('/monitor/mail', { enabled: !!toggle.checked }).then(function(data) {
+            toast((data && data.message) || tr('Email folder monitoring updated'), 'success');
         }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
     }
     function pollMonitorStarted() {
@@ -2518,30 +3237,116 @@
 
     // ----- Maintenance -----
     function renderMaintenance() {
-        return '<div class="card"><div class="card-header"><span class="card-title">Maintenance</span></div>' +
-            '<button class="btn btn-warning" data-action="run-maint">Run Maintenance</button> ' +
-            '<button class="btn btn-danger" data-action="run-purge">Purge All Data</button></div>';
+        return '<div class="maintenance-grid">' +
+            '<section class="card maintenance-card"><div class="card-header"><span class="card-title">Maintenance tasks</span></div>' +
+            '<p class="maintenance-description">Run routine cleanup or remove Maldet data.</p>' +
+            '<div class="maintenance-actions">' +
+            '<button class="btn btn-warning" data-action="run-maint">Run Maintenance</button>' +
+            '<button class="btn btn-danger" data-action="run-purge">Purge All Data</button>' +
+            '</div></section>' +
+            '<section class="card maintenance-card"><div class="card-header"><span class="card-title">Service and server</span></div>' +
+            '<p class="maintenance-description">Restart the WebGUI or reboot the entire server.</p>' +
+            '<div class="maintenance-actions">' +
+            '<button class="btn btn-ghost" id="reload-gui-btn" type="button" title="Reload WebGUI" aria-label="Reload WebGUI">🔃 <span>Reload WebGUI</span></button>' +
+            '<button class="btn btn-danger" id="system-reboot-btn" type="button" title="Reboot Server" aria-label="Reboot Server">⏻ <span>Reboot Server</span></button>' +
+            '</div></section></div>';
     }
 
     function runMaint() {
         API.post('/maintenance', {}).then(function() { toast('Maintenance complete', 'success'); });
     }
     function runPurge() {
-        if (!confirm('Clear all logs, quarantine, and temp data?')) return;
+        if (!confirm(tr('Clear all logs, quarantine, and temp data?'))) return;
         API.post('/purge', {}).then(function() { toast('Purge complete', 'success'); });
     }
 
     // ----- System Info -----
-    function renderSystemInfo() {
-        return API.get('/system').then(function(data) {
-            var sys = data.system;
-            var h = '<div class="card"><div class="card-header"><span class="card-title">System Info</span></div><table>';
-            for (var key in sys) {
-                if (key === 'binaries' || key === 'active_scans') continue;
-                h += '<tr><th>' + escapeHtml(key) + '</th><td>' + escapeHtml(String(sys[key])) + '</td></tr>';
-            }
+    function systemMetric(label, percent, detail) {
+        var valid = typeof percent === 'number' && isFinite(percent);
+        var value = valid ? Math.max(0, Math.min(100, percent)) : null;
+        var level = value === null ? '' : value >= 85 ? ' danger' : value >= 60 ? ' warning' : '';
+        var display = value === null ? tr('Unavailable') : Math.round(value) + '%';
+        return '<div class="system-metric card"><div class="system-metric-heading"><span>' +
+            escapeHtml(label) + '</span><strong>' + escapeHtml(display) + '</strong></div>' +
+            '<div class="system-meter' + level + '" role="progressbar" aria-label="' + escapeHtml(label) +
+            '" aria-valuemin="0" aria-valuemax="100"' +
+            (value === null ? '' : ' aria-valuenow="' + Math.round(value) + '"') +
+            '><div class="system-meter-fill" style="width:' + (value === null ? 0 : value) + '%"></div></div>' +
+            '<div class="system-metric-detail">' + escapeHtml(detail) + '</div></div>';
+    }
 
-            h += '</table></div>';
+    function systemDetail(label, value) {
+        return '<div class="system-detail"><dt>' + tr(label) + '</dt><dd>' +
+            escapeHtml(value === null || value === undefined || value === '' ? tr('Unavailable') : String(value)) +
+            '</dd></div>';
+    }
+
+    function renderSystemInfo() {
+        return Promise.all([API.get('/system'), API.get('/system/usage').catch(function() {
+            return null;
+        })]).then(function(results) {
+            var sys = results[0].system, usage = results[1];
+            var memTotal = usage && usage.mem_total_mb > 0 ? usage.mem_total_mb : sys.mem_total_mb;
+            var memAvailable = usage && usage.mem_total_mb > 0 ? usage.mem_available_mb : sys.mem_available_mb;
+            var memValid = typeof memTotal === 'number' && memTotal > 0 &&
+                typeof memAvailable === 'number' && memAvailable >= 0;
+            var diskValid = typeof sys.disk_total_gb === 'number' && sys.disk_total_gb > 0 &&
+                typeof sys.disk_free_gb === 'number' && sys.disk_free_gb >= 0;
+            var memUsed = memValid ? Math.max(0, memTotal - memAvailable) : 0;
+            var diskUsed = diskValid ? Math.max(0, sys.disk_total_gb - sys.disk_free_gb) : 0;
+            var h = '<div class="system-page"><div class="card system-hero">' +
+                '<div><span class="system-eyebrow">' + tr('Host overview') + '</span><h2>' +
+                escapeHtml(sys.hostname || tr('Unavailable')) + '</h2><p>' +
+                escapeHtml([sys.system, sys.release, sys.machine].filter(Boolean).join(' ') || tr('Unavailable')) +
+                '</p></div><div class="system-health">' +
+                '<span class="system-health-item ' + (sys.monitor_running ? 'is-online' : 'is-offline') + '">' +
+                tr('Monitor') + ': ' + tr(sys.monitor_running ? 'ONLINE' : 'OFFLINE') + '</span>' +
+                '<span class="system-health-item">' + tr('Active Scans') + ': ' +
+                (Array.isArray(sys.active_scans) ? sys.active_scans.length : 0) + '</span></div></div>';
+            h += '<h3 class="system-section-title">' + tr('System resources') + '</h3><div class="system-metrics">';
+            h += systemMetric(tr('CPU'), usage && usage.cpu_percent,
+                sys.cpu || tr('Unavailable'));
+            h += systemMetric(tr('RAM'), memValid ? memUsed / memTotal * 100 : null,
+                memValid ? formatMb(memUsed) + ' ' + tr('used') + ' ' + tr('of') + ' ' + formatMb(memTotal) +
+                    ' · ' + formatMb(memAvailable) + ' ' + tr('available') : tr('Unavailable'));
+            h += systemMetric(tr('Disk'), diskValid ? diskUsed / sys.disk_total_gb * 100 : null,
+                diskValid ? diskUsed.toFixed(1) + ' GB ' + tr('used') + ' ' + tr('of') + ' ' +
+                    sys.disk_total_gb + ' GB · ' + sys.disk_free_gb + ' GB ' + tr('free') : tr('Unavailable'));
+            h += '</div><div class="system-panels"><div class="card"><div class="card-header"><span class="card-title">' +
+                tr('Host and runtime') + '</span></div><dl class="system-details">';
+            h += systemDetail('Hostname', sys.hostname);
+            h += systemDetail('Operating system', [sys.system, sys.release].filter(Boolean).join(' '));
+            h += systemDetail('Architecture', sys.machine);
+            h += systemDetail('Processor', sys.cpu || sys.processor);
+            h += systemDetail('CPU cores', sys.cpu_cores);
+            h += systemDetail('Python version', sys.python_version);
+            h += '</dl></div><div class="card"><div class="card-header"><span class="card-title">' +
+                tr('System Information') + '</span></div><dl class="system-details">';
+            h += systemDetail('Maldet Version', sys.version);
+            h += systemDetail('Signature Set', sys.signature_version);
+            h += systemDetail('ClamAV', (sys.clamav_version || tr('Unavailable')) +
+                ' (' + (sys.clamav_status || tr('Unavailable')) + ')');
+            h += systemDetail('Install path', sys.base_dir);
+            h += systemDetail('Log directory', sys.log_dir);
+            h += systemDetail('Maldet binary', sys.maldet_path);
+            h += systemDetail('Installer path', sys.installer_path);
+            h += systemDetail('Installer directory', sys.installer_directory);
+            h += systemDetail('GUI privileges', sys.is_root ? tr('Root') : tr('Unprivileged'));
+            h += systemDetail('Effective UID', sys.euid);
+            h += systemDetail('Monitor PIDs', (sys.monitor_pids || []).join(', '));
+            h += '</dl></div></div><div class="card"><div class="card-header"><span class="card-title">' +
+                tr('Binary Detection') + '</span></div><div class="system-binaries">';
+            var binaries = sys.binaries || {};
+            var names = Object.keys(binaries).sort();
+            if (!names.length) h += '<p class="form-help">' + tr('No binaries reported') + '</p>';
+            names.forEach(function(name) {
+                var path = binaries[name];
+                h += '<div class="system-binary"><div><strong>' + escapeHtml(name) +
+                    '</strong><span>' + escapeHtml(path || tr('not found')) + '</span></div>' +
+                    '<span class="badge ' + (path ? 'bg-success' : 'bg-danger') + '">' +
+                    tr(path ? 'Found' : 'Missing') + '</span></div>';
+            });
+            h += '</div></div></div>';
             return h;
         });
     }
@@ -2593,6 +3398,10 @@
     // ----- Initialize -----
     document.addEventListener('DOMContentLoaded', function() {
         window.__maldet_booted = true;
+        // Resume an in-flight reboot or WebGUI-reload countdown after a page
+        // reload so the timer does not restart from the top.
+        resumeRebootCountdown();
+        resumeGuiReloadCountdown();
         API.get('/auth/status').then(function(status) {
             if (status.authenticated) {
                 Router.init();

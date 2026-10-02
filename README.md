@@ -198,6 +198,7 @@ The GUI provides a JSON API at `/api/*`:
 | `/api/logs` | GET | Event log entries |
 | `/api/monitor` | POST | Start/stop/reload monitor |
 | `/api/monitor/webserver` | GET | Detect running web server + document roots (runs `maldet --webserver-detect`); returns `detected`, `servers`, `docroots` and `autodetect` state |
+| `/api/monitor/mail` | GET/POST | Detect running mail server + mail folders (runs `maldet --mail-detect`); GET returns `detected`, `servers`, `maildirs` and `autodetect` state; POST `{enabled}` toggles `inotify_maildir_autodetect` |
 | `/api/monitor/webserver` | POST | `{enabled: true|false}` — enable/disable monitoring of the detected document roots (`inotify_docroot_autodetect` in conf.maldet) |
 | `/api/monitor/activity` | GET | Tail the monitor's `inotify_log` in real time; returns `running`, `total_events` and `entries` (`{file, event, time}`, newest first) |
 | `/api/update/sigs` | POST | Update signatures |
