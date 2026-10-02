@@ -201,11 +201,45 @@ body {
     align-items: center;
 }
 
-.top-bar-actions #system-reboot-btn { white-space: nowrap; }
-.top-bar-actions #system-reboot-btn:disabled { opacity: .55; cursor: not-allowed; }
+.maintenance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    align-items: start;
+}
 
-.top-bar-actions #reload-gui-btn { white-space: nowrap; }
-.top-bar-actions #reload-gui-btn:disabled { opacity: .55; cursor: not-allowed; }
+.maintenance-card {
+    margin: 0;
+}
+
+.maintenance-description {
+    margin: 0 0 18px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.monitoring-summary-settings {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    row-gap: 14px;
+}
+
+.maintenance-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.maintenance-actions .btn {
+    min-height: 40px;
+}
+
+.maintenance-actions #system-reboot-btn { white-space: nowrap; }
+.maintenance-actions #system-reboot-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.maintenance-actions #reload-gui-btn { white-space: nowrap; }
+.maintenance-actions #reload-gui-btn:disabled { opacity: .55; cursor: not-allowed; }
 
 .top-bar-title {
     display: flex;
@@ -416,6 +450,13 @@ tr:hover td {
     letter-spacing: 0.5px;
 }
 
+.dashboard-greeting {
+    padding: 8px 14px 0;
+    color: var(--text-secondary);
+    font-size: 18px;
+    font-weight: 600;
+}
+
 .stat.danger .stat-value { color: var(--danger); }
 .stat.success .stat-value { color: var(--success); }
 .stat.warning .stat-value { color: var(--warning); }
@@ -426,66 +467,57 @@ tr:hover td {
 .gauge-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 32px;
-    justify-content: center;
+    gap: 24px;
     padding: 8px 0 4px;
 }
 
 .gauge-item {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    width: 140px;
+    gap: 10px;
+    flex: 1 1 280px;
+    min-width: 0;
 }
 
 .gauge {
-    display: grid;
-    place-items: center;
-    width: 130px;
-    height: 130px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
-.gauge-svg {
-    grid-area: 1 / 1;
-    width: 100%;
-    height: 100%;
-    transform: rotate(-90deg);
+.gauge-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
 }
 
 .gauge-track {
-    fill: none;
-    stroke: var(--bg-tertiary);
-    stroke-width: 8;
+    overflow: hidden;
+    height: 10px;
+    background: var(--bg-tertiary);
+    border-radius: 999px;
 }
 
 .gauge-value {
-    fill: none;
-    stroke: var(--accent);
-    stroke-width: 8;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 0.6s ease, stroke 0.3s ease;
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    border-radius: inherit;
+    transition: width 0.6s ease, background-color 0.3s ease;
 }
 
-.gauge-value.warning { stroke: var(--warning); }
-.gauge-value.danger { stroke: var(--danger); }
+.gauge-value.warning { background: var(--warning); }
+.gauge-value.danger { background: var(--danger); }
 
-.gauge-center {
-    grid-area: 1 / 1;
-    display: flex;
-    align-items: baseline;
-    gap: 2px;
+.gauge-track[aria-valuenow] {
+    position: relative;
 }
 
 .gauge-percent {
-    font-size: 26px;
+    font-size: 20px;
     font-weight: 700;
     color: var(--text-primary);
-}
-
-.gauge-percent-sign {
-    font-size: 14px;
-    color: var(--text-secondary);
 }
 
 .gauge-label {
@@ -499,7 +531,6 @@ tr:hover td {
 .gauge-sub {
     font-size: 12px;
     color: var(--text-muted);
-    text-align: center;
 }
 
 /* ===== System information ===== */
@@ -1885,8 +1916,6 @@ tr:hover td {
     .top-bar-actions #settings-btn {
         display: none;
     }
-    .top-bar-actions #system-reboot-btn span { display: none; }
-    .top-bar-actions #reload-gui-btn span { display: none; }
 
     .grid-4 {
         grid-template-columns: 1fr;

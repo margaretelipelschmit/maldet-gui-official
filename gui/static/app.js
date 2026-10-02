@@ -80,8 +80,11 @@
             options.method = 'GET';
             return this._fetch(path, options);
         },
-        post: function(path, body) {
-            return this._fetch(path, { method: 'POST', body: JSON.stringify(body || {}) });
+        post: function(path, body, options) {
+            options = options || {};
+            options.method = 'POST';
+            options.body = JSON.stringify(body || {});
+            return this._fetch(path, options);
         },
         put: function(path, body) {
             return this._fetch(path, { method: 'PUT', body: JSON.stringify(body || {}) });
@@ -119,6 +122,7 @@
 
     // ----- Toast Notifications -----
     function toast(message, type, duration) {
+        message = tr(String(message));
         type = type || 'info';
         duration = duration || 5000;
         var container = document.getElementById('toast-container');
@@ -414,7 +418,7 @@
         lang: localStorage.getItem('maldet.gui.language') || 'en',
         pt: {
             'Language': 'Idioma', 'English': 'Inglês', 'Português (Brasil)': 'Português (Brasil)',
-            'Dashboard': 'Painel', 'Scanner': 'Scanner', 'Scan Management': 'Gerenciamento de scans',
+            'Dashboard': 'Painel', 'Scanner': 'Scanner', 'Scan Management': 'Gerenciamento de verificações',
             'About Maldet': 'Sobre o Maldet',
             'Quarantine': 'Quarentena', 'Reports': 'Relatórios', 'Monitoring': 'Monitoramento',
             'Updates': 'Atualizações', 'Configuration': 'Configuração', 'Test Alerts': 'Testar alertas',
@@ -424,18 +428,18 @@
             'Online · Monitor ON': 'Online · Monitor ligado', 'Online · Monitor OFF': 'Online · Monitor desligado',
             'Loading...': 'Carregando...', 'Error': 'Erro', 'System Information': 'Informações do sistema',
             'Binary Detection': 'Detecção de binários', 'Scan Configuration': 'Configuração do scan',
-            'Scan Type': 'Tipo de scan', 'Scanner engine': 'Mecanismo do scanner', 'Path': 'Caminho',
+            'Scan Type': 'Tipo de verificação', 'Scanner engine': 'Mecanismo do scanner', 'Path': 'Caminho',
             'Browse': 'Procurar', 'Modified within (days)': 'Modificados nos últimos (dias)',
             'Config Overrides (-co)': 'Substituições de configuração (-co)', 'Include Regex (-i)': 'Regex de inclusão (-i)',
             'Exclude Regex (-x)': 'Regex de exclusão (-x)', 'Options': 'Opções',
             'Run in background (recommended)': 'Executar em segundo plano (recomendado)',
-            'Start Scan': 'Iniciar scan', 'Preparing...': 'Preparando...', 'Starting...': 'Iniciando...',
+            'Start Scan': 'Iniciar verificação', 'Preparing...': 'Preparando...', 'Starting...': 'Iniciando...',
             'Choose scan folder': 'Escolher pasta do scan', 'Cancel': 'Cancelar',
             'Select this folder': 'Selecionar esta pasta', 'Active Scans': 'Scans ativos',
             'Live updates every 3s': 'Atualização ao vivo a cada 3 s',
             'Live updates every 5s': 'Atualização ao vivo a cada 5 s', 'Details': 'Detalhes',
             'Stop': 'Parar', 'Stopping...': 'Parando...', 'Close': 'Fechar',
-            'Quarantined Files': 'Arquivos em quarentena', 'Scan Reports': 'Relatórios de scans',
+            'Quarantined Files': 'Arquivos em quarentena', 'Scan Reports': 'Relatórios de verificações',
             'Quarantine': 'Quarentenar', 'Restore': 'Restaurar', 'Inotify Monitoring': 'Monitoramento inotify',
             'Start': 'Iniciar', 'Reload': 'Recarregar', 'Update': 'Atualizar', 'Beta': 'Beta',
             'Update Sigs': 'Atualizar assinaturas', 'Update ClamAV': 'Atualizar ClamAV',
@@ -464,15 +468,15 @@
             'Hide raw file': 'Ocultar arquivo bruto',
             'File not installed': 'Arquivo não instalado',
             'No scheduled scans yet. Click "New Schedule" to create one.': 'Nenhum scan agendado ainda. Clique em "Novo agendamento" para criar um.',
-            'Name': 'Nome', 'Path': 'Caminho', 'Schedule': 'Frequência', 'Status': 'Status',
+            'Name': 'Nome', 'Path': 'Caminho', 'Schedule': 'Agendamento', 'Status': 'Status',
             'Enabled': 'Habilitado', 'Disabled': 'Desabilitado',
             'Edit': 'Editar', 'Delete': 'Excluir', 'Enable': 'Habilitar', 'Disable': 'Desabilitar',
             'View Reports': 'Ver relatórios', 'Reports for': 'Relatórios de',
             'No reports found yet for this schedule.': 'Nenhum relatório encontrado ainda para este agendamento.',
             'Delete this schedule? Its cron entry will be removed.': 'Excluir este agendamento? A entrada do cron será removida.',
             'Schedule saved': 'Agendamento salvo', 'Schedule deleted': 'Agendamento excluído',
-            'Schedule name': 'Nome do agendamento', 'Scan type': 'Tipo de scan',
-            'Full scan (all files)': 'Scan completo (todos os arquivos)',
+            'Schedule name': 'Nome do agendamento',             'Scan type': 'Tipo de verificação',
+            'Full scan (all files)': 'Verificação completa (todos os arquivos)',
             'Recent files only': 'Somente arquivos recentes',
             'Modified within (days)': 'Modificados nos últimos (dias)',
             'Frequency': 'Frequência', 'Daily': 'Diário', 'Weekly': 'Semanal', 'Custom (cron expression)': 'Personalizado (expressão cron)',
@@ -485,9 +489,9 @@
             'Save Schedule': 'Salvar agendamento', 'Saving...': 'Salvando...',
             'Daily at': 'Diariamente às', 'Weekly on': 'Semanalmente em', 'at': 'às',
             'Custom:': 'Personalizado:',
-            'Daily scan & maintenance': 'Scan diário e manutenção',
+            'Daily scan & maintenance': 'Verificação diária e manutenção',
             'Weekly signature watchdog': 'Verificação semanal de assinaturas',
-            'Public path scan trigger': 'Gatilho de scan de caminhos públicos',
+            'Public path scan trigger': 'Gatilho de verificação de caminhos públicos',
             'Independent signature updates': 'Atualizações independentes de assinaturas',
             'GUI-managed scheduled scans': 'Scans agendados gerenciados pela GUI',            'Save ignore list': 'Salvar lista de exclusão',
             'Ignore list saved': 'Lista de exclusão salva',
@@ -519,9 +523,9 @@
             'update:version update': 'Atualização de versão',
             'update:beta version update': 'Atualização para a versão beta',
             'update:clamav database update': 'Atualização da base de dados do ClamAV',
-            'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Scan concluído — ameaças encontradas!',
-            'Scan complete - no malware': 'Scan concluído — nenhum malware encontrado',
-            'Scan started in background': 'Scan iniciado em segundo plano', 'Monitor started': 'Monitor iniciado',
+            'Ready to run': 'Pronto para executar', 'Scan complete - hits found!': 'Verificação concluída — ameaças encontradas!',
+            'Scan complete - no malware': 'Verificação concluída — nenhum malware encontrado',
+            'Scan started in background': 'Verificação iniciada em segundo plano', 'Monitor started': 'Monitor iniciado',
             'Monitor stopped': 'Monitor parado', 'Monitor reloaded': 'Monitor recarregado',
             'Real-time monitoring (inotify)': 'Monitoramento em tempo real (inotify)',
             'Inotify': 'inotify',
@@ -654,6 +658,26 @@
             'Stopped': 'Parado', 'Resume': 'Retomar', 'Discard': 'Descartar',
             'Resuming...': 'Retomando...', 'Discarding...': 'Descartando...',
             'Resource Usage': 'Uso de recursos', 'RAM': 'RAM',
+            'Current date and time': 'Data e hora atuais',
+            'Good morning': 'Bom dia',
+            'Good afternoon': 'Boa tarde',
+            'Good evening': 'Boa noite',
+            'Latest scan report': 'Relatório de scan mais recente',
+            'Monitoring overview': 'Resumo do monitoramento',
+            'Latest monitored activity': 'Atividade monitorada mais recente',
+            'Web server monitoring': 'Monitoramento do servidor web',
+            'Email folder monitoring': 'Monitoramento de pastas de e-mail',
+            'Extra monitored folders': 'Pastas extras monitoradas',
+            'Scope: ': 'Escopo: ',
+            'All folders (recursive)': 'Todas as pastas (recursivo)',
+            'Web folders only': 'Somente pastas web',
+            'Custom paths': 'Caminhos personalizados',
+            'Maintenance tasks': 'Tarefas de manutenção',
+            'Run routine cleanup or remove Maldet data.': 'Execute a limpeza de rotina ou remova dados do Maldet.',
+            'Service and server': 'Serviço e servidor',
+            'Restart the WebGUI or reboot the entire server.': 'Reinicie a WebGUI ou todo o servidor.',
+            'No scan reports found.': 'Nenhum relatório de scan encontrado.',
+            'Unable to load scan reports.': 'Não foi possível carregar os relatórios de scan.',
             'Waiting for data...': 'Aguardando dados...', 'Live': 'Ao vivo',
             'Host overview': 'Visão geral do host', 'System resources': 'Recursos do sistema',
             'Disk': 'Disco', 'Unavailable': 'Indisponível', 'used': 'usados',
@@ -671,13 +695,15 @@
             'Effective UID': 'UID efetivo', 'Monitor PIDs': 'PIDs do monitor',
             'Reboot system': 'Reiniciar sistema', 'Reboot': 'Reiniciar',
             'Reboot Server': 'Reiniciar servidor', 'Reload WebGUI': 'Recarregar WebGUI',
+            'Open menu': 'Abrir menu', 'Settings': 'Configurações',
+            'Refresh': 'Atualizar', 'Language': 'Idioma',
             'Reboot the entire server in one minute? Active scans and connections will be interrupted.':
-                'Reiniciar todo o servidor em um minuto? Scans ativos e conexões serão interrompidos.',
+                'Reiniciar todo o servidor em um minuto? Verificações ativas e conexões serão interrompidas.',
             'System reboot scheduled': 'Reinicialização do sistema agendada',
             'The server will restart in': 'O servidor será reiniciado em',
             'Restarting now...': 'Reiniciando agora...',
             'Active scans and connections will be interrupted.':
-                'Scans ativos e conexões serão interrompidos.',
+                'Verificações ativas e conexões serão interrompidas.',
             'WebGUI restart scheduled': 'Reinicialização da WebGUI agendada',
             'The WebGUI will restart in': 'A WebGUI será reiniciada em',
             'The page reconnects automatically when the service is back.':
@@ -686,6 +712,87 @@
                 'Reiniciar o serviço da WebGUI em 10 segundos? A página será reconectada automaticamente.',
             'No detections in this scan': 'Nenhuma detecção neste scan',
             'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
+            'Scan details': 'Detalhes da verificação',
+            'Scan report': 'Relatório da verificação',
+            'Infection details': 'Detalhes da infecção',
+            'Open menu': 'Abrir menu',
+            'Error: ': 'Erro: ',
+            'Scan form not loaded yet - please wait and try again':
+                'O formulário de verificação ainda não carregou. Aguarde e tente novamente.',
+            'Enter a scan path before starting': 'Informe o caminho da verificação antes de iniciá-la.',
+            'Recent scans require at least 1 day': 'Verificações recentes exigem pelo menos 1 dia.',
+            'Preparing scan...': 'Preparando a verificação...',
+            'Scan complete - hits found!': 'Verificação concluída — ameaças encontradas!',
+            'Scan complete - no malware': 'Verificação concluída — nenhum malware encontrado.',
+            'Scan started in background': 'Verificação iniciada em segundo plano.',
+            'Scan started': 'Verificação iniciada.',
+            'Discard the checkpoint for scan ': 'Descartar o ponto de retomada do scan ',
+            '? This cannot be undone and the scan will no longer be resumable.':
+                '? Esta ação não pode ser desfeita e o scan não poderá mais ser retomado.',
+            'Stop scan ': 'Parar o scan ',
+            'Restore ': 'Restaurar ',
+            'Try to clean ': 'Tentar limpar ',
+            'Permanently delete ': 'Excluir permanentemente ',
+            ' from quarantine?': ' da quarentena?',
+            'This cannot be undone — the file will NOT be restored.':
+                'Esta ação não pode ser desfeita — o arquivo NÃO será restaurado.',
+            'The file is restored to its original location, cleaned with the matching maldet clean rule and rescanned. If cleaning fails, it is moved back to quarantine.':
+                'O arquivo será restaurado ao local original, limpo com a regra correspondente do Maldet e verificado novamente. Se a limpeza falhar, ele voltará para a quarentena.',
+            'File restored successfully': 'Arquivo restaurado com sucesso.',
+            'Restore failed: ': 'Falha ao restaurar: ',
+            'File cleaned successfully (restored to original path)':
+                'Arquivo limpo com sucesso e restaurado ao caminho original.',
+            'Clean attempted; no clean rule matched or cleaning failed — file remains in quarantine. Check the output: ':
+                'A limpeza foi tentada, mas nenhuma regra correspondente foi encontrada ou ocorreu uma falha. O arquivo permanece em quarentena. Verifique a saída: ',
+            'Clean failed: ': 'Falha ao limpar: ',
+            'Quarantined file deleted': 'Arquivo excluído da quarentena.',
+            'Delete failed: ': 'Falha ao excluir: ',
+            'Restored ': 'Restaurados: ',
+            '; failed: ': '; falhas: ',
+            'All quarantined files restored (': 'Todos os arquivos em quarentena foram restaurados (',
+            'Restore all failed: ': 'Falha ao restaurar todos os arquivos: ',
+            'No log entries found.': 'Nenhuma entrada de log encontrada.',
+            'Scan form not loaded yet - please wait and try again': 'O formulário ainda não carregou. Aguarde e tente novamente.',
+            'Enter a schedule name': 'Informe o nome do agendamento.',
+            'Enter a scan path': 'Informe o caminho da verificação.',
+            'Monitor is already running': 'O monitor já está em execução.',
+            'Monitor started': 'Monitor iniciado.',
+            'Monitor stopped': 'Monitor parado.',
+            'Monitor reloaded': 'Monitor recarregado.',
+            'Stopping monitor... (may take up to 2 minutes)':
+                'Parando o monitor... (isso pode levar até 2 minutos)',
+            'Starting monitor...': 'Iniciando o monitor...',
+            'Timed out waiting for the monitor to start':
+                'Tempo limite excedido ao aguardar o início do monitor.',
+            'Timed out waiting for the monitor to stop':
+                'Tempo limite excedido ao aguardar a parada do monitor.',
+            'User selection saved; reload the monitor':
+                'Seleção de usuários salva; recarregue o monitor.',
+            'Web server monitoring updated': 'Monitoramento do servidor web atualizado.',
+            'Email folder monitoring updated': 'Monitoramento das pastas de e-mail atualizado.',
+            'Monitor scope saved': 'Escopo do monitoramento salvo.',
+            'Enter a folder path to add.': 'Informe o caminho da pasta que deseja adicionar.',
+            'Absolute path required (e.g. /var/www).': 'Informe um caminho absoluto (ex.: /var/www).',
+            'Folder already in the list.': 'A pasta já está na lista.',
+            'Monitored folders saved': 'Pastas monitoradas salvas.',
+            'New password must contain at least 8 characters':
+                'A nova senha deve ter pelo menos 8 caracteres.',
+            'New passwords do not match': 'As novas senhas não coincidem.',
+            'Password changed successfully': 'Senha alterada com sucesso.',
+            'Password change failed: ': 'Falha ao alterar a senha: ',
+            'No configuration changes to save': 'Não há alterações de configuração para salvar.',
+            'Saved ': 'Salvas: ',
+            ' configuration change(s)': ' alteração(ões) de configuração.',
+            'Configuration save failed: ': 'Falha ao salvar a configuração: ',
+            'Alert sent successfully': 'Alerta enviado com sucesso.',
+            'Alert failed: ': 'Falha ao enviar o alerta: ',
+            'Maintenance complete': 'Manutenção concluída.',
+            'Purge complete': 'Limpeza concluída.',
+            'Clear all logs, quarantine, and temp data?':
+                'Limpar todos os logs, a quarentena e os dados temporários?',
+            'No output returned by maldet.': 'O Maldet não retornou nenhuma saída.',
+            'Error loading details: ': 'Erro ao carregar os detalhes: ',
+            'Error loading report: ': 'Erro ao carregar o relatório: ',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
             'Deleting...': 'Excluindo...', 'Restoring all...': 'Restaurando tudo...',
             'Quarantining...': 'Colocando em quarentena...', 'Quarantine': 'Quarentenar',
@@ -705,7 +812,13 @@
         }
     };
     function tr(text) {
-        return I18N.lang === 'pt-BR' ? (I18N.pt[text] || text) : text;
+        if (I18N.lang !== 'pt-BR') return text;
+        if (I18N.pt[text]) return I18N.pt[text];
+        var keys = Object.keys(I18N.pt).filter(function(key) {
+            return key.length > 0 && key.charAt(key.length - 1) === ' ' &&
+                text.indexOf(key) === 0;
+        }).sort(function(a, b) { return b.length - a.length; });
+        return keys.length ? I18N.pt[keys[0]] + text.slice(keys[0].length) : text;
     }
     function translateDom(root) {
         if (I18N.lang !== 'pt-BR') return;
@@ -817,6 +930,10 @@
             translateDom(content);
             content.scrollTop = scroll;
             _lastPageHtml = html;
+            if (name === 'maintenance') {
+                initReloadGuiButton();
+                initRebootButton();
+            }
             if (name === 'dashboard') refreshDashboardUsage();
         }).catch(function() {
             // Silent: transient polling errors must not replace the page.
@@ -839,6 +956,7 @@
     var Router = {
         currentPage: 'dashboard',
         routes: {},
+        initialized: false,
         register: function(name, fn) { this.routes[name] = fn; },
         navigate: function(name) {
             if (this.currentPage === 'scan-management' && name !== 'scan-management') {
@@ -875,6 +993,10 @@
                 Promise.resolve(this.routes[name]()).then(function(html) {
                     content.innerHTML = html;
                     translateDom(content);
+                    if (name === 'maintenance') {
+                        initReloadGuiButton();
+                        initRebootButton();
+                    }
                     if (name === 'scan-management') startScanManagementRefresh();
                     if (name === 'monitoring') startMonitorActivityRefresh();
                     if (name === 'dashboard') startDashboardRefresh();
@@ -888,6 +1010,8 @@
             }
         },
         init: function() {
+            if (this.initialized) return;
+            this.initialized = true;
             var self = this;
             document.getElementById('sidebar-nav').addEventListener('click', function(e) {
                 var item = e.target.closest('.nav-item');
@@ -1016,20 +1140,17 @@
 
     // ----- Dashboard -----
     // ----- Dashboard resource gauges (CPU/RAM, live) -----
-    var GAUGE_CIRCUMFERENCE = 2 * Math.PI * 45;
     var _dashboardUsageTimer = null;
+    var _dashboardClockTimer = null;
 
     function buildGaugeHtml(metric, label) {
         return '<div class="gauge-item">' +
             '<div class="gauge" data-gauge="' + metric + '">' +
-            '<svg class="gauge-svg" viewBox="0 0 100 100">' +
-            '<circle class="gauge-track" cx="50" cy="50" r="45"></circle>' +
-            '<circle class="gauge-value" cx="50" cy="50" r="45" ' +
-            'style="stroke-dasharray:' + GAUGE_CIRCUMFERENCE.toFixed(2) + ';stroke-dashoffset:' + GAUGE_CIRCUMFERENCE.toFixed(2) + ';"></circle>' +
-            '</svg>' +
-            '<div class="gauge-center"><span class="gauge-percent">--</span><span class="gauge-percent-sign">%</span></div>' +
+            '<div class="gauge-heading"><span class="gauge-label">' + escapeHtml(label) + '</span>' +
+            '<span class="gauge-percent">--%</span></div>' +
+            '<div class="gauge-track" role="progressbar" aria-label="' + escapeHtml(label) +
+            '" aria-valuemin="0" aria-valuemax="100"><div class="gauge-value"></div></div>' +
             '</div>' +
-            '<div class="gauge-label">' + escapeHtml(label) + '</div>' +
             '<div class="gauge-sub" data-gauge-sub="' + metric + '">' + tr('Waiting for data...') + '</div>' +
             '</div>';
     }
@@ -1037,20 +1158,24 @@
     function setGaugeValue(metric, percent) {
         var container = document.querySelector('[data-gauge="' + metric + '"]');
         if (!container) return;
-        var circle = container.querySelector('.gauge-value');
+        var bar = container.querySelector('.gauge-value');
+        var track = container.querySelector('.gauge-track');
         var text = container.querySelector('.gauge-percent');
         if (percent === null || percent === undefined || isNaN(percent)) {
-            if (text) text.textContent = '--';
+            if (text) text.textContent = '--%';
+            if (bar) bar.style.width = '0%';
+            if (track) track.removeAttribute('aria-valuenow');
             return;
         }
         var pct = Math.max(0, Math.min(100, percent));
-        if (circle) {
-            circle.style.strokeDashoffset = (GAUGE_CIRCUMFERENCE * (1 - pct / 100)).toFixed(2);
-            circle.classList.remove('warning', 'danger');
-            if (pct >= 85) circle.classList.add('danger');
-            else if (pct >= 60) circle.classList.add('warning');
+        if (bar) {
+            bar.style.width = pct + '%';
+            bar.classList.remove('warning', 'danger');
+            if (pct >= 85) bar.classList.add('danger');
+            else if (pct >= 60) bar.classList.add('warning');
         }
-        if (text) text.textContent = Math.round(pct);
+        if (track) track.setAttribute('aria-valuenow', String(Math.round(pct)));
+        if (text) text.textContent = Math.round(pct) + '%';
     }
 
     function formatMb(mb) {
@@ -1082,25 +1207,144 @@
         stopDashboardRefresh();
         refreshDashboardUsage();
         _dashboardUsageTimer = setInterval(refreshDashboardUsage, 3000);
+        updateDashboardClock();
+        _dashboardClockTimer = setInterval(updateDashboardClock, 1000);
+    }
+
+    function updateDashboardClock() {
+        var clock = document.getElementById('dashboard-clock');
+        if (!clock) return;
+        var now = new Date();
+        var hour = now.getHours();
+        var greeting = hour >= 5 && hour < 12 ? tr('Good morning') :
+            hour >= 12 && hour < 18 ? tr('Good afternoon') : tr('Good evening');
+        var greetingNode = document.getElementById('dashboard-greeting');
+        if (greetingNode) greetingNode.textContent = greeting;
+        clock.textContent = now.toLocaleString(
+            I18N.lang === 'pt-BR' ? 'pt-BR' : undefined,
+            { dateStyle: 'full', timeStyle: 'medium' }
+        );
     }
 
     function stopDashboardRefresh() {
         if (_dashboardUsageTimer) { clearInterval(_dashboardUsageTimer); _dashboardUsageTimer = null; }
+        if (_dashboardClockTimer) { clearInterval(_dashboardClockTimer); _dashboardClockTimer = null; }
     }
 
     function renderDashboard() {
-        return API.get('/system').then(function(data) {
-            var sys = data.system;
+        return Promise.all([
+            API.get('/system'),
+            API.get('/scans').catch(function() { return { reports: null }; }),
+            API.get('/monitor/activity?lines=1').catch(function() { return null; }),
+            API.get('/monitor/users').catch(function() { return null; }),
+            API.get('/monitor/webserver').catch(function() { return null; }),
+            API.get('/monitor/mail').catch(function() { return null; }),
+            API.get('/monitor/paths').catch(function() { return null; }),
+            API.get('/monitor/scope').catch(function() { return null; })
+        ]).then(function(results) {
+            var sys = results[0].system;
+            var reports = Array.isArray(results[1].reports) ? results[1].reports.slice() : null;
+            var monitorActivity = results[2];
+            var monitorUsers = results[3];
+            var monitorWeb = results[4];
+            var monitorMail = results[5];
+            var monitorPaths = results[6];
+            var monitorScope = results[7];
+            if (reports) reports.sort(function(a, b) {
+                return (Number(b.completed_epoch || b.started_epoch) || 0) -
+                    (Number(a.completed_epoch || a.started_epoch) || 0);
+            });
+            var latestReport = reports && reports.length ? reports[0] : null;
             var h = '';
+            h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' + tr('Current date and time') + '</span></div>';
+            h += '<div id="dashboard-greeting" class="dashboard-greeting"></div>';
+            h += '<div id="dashboard-clock" class="stat-value" style="padding:8px 14px;">--</div></div>';
+            h += '<div class="grid grid-4" style="margin-bottom:20px;">';
+            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.version || 'unknown') + '</div><div class="stat-label">' + tr('Maldet Version') + '</div></div>';
+            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.signature_version || '?') + '</div><div class="stat-label">' + tr('Signature Set') + '</div></div>';
+            h += '<div class="stat ' + (sys.clamav_available ? 'success' : 'danger') + '"><div class="stat-value">' + escapeHtml(sys.clamav_version || '?') + '</div><div class="stat-label">' + tr('ClamAV Status') + '</div></div>';
+            h += '<div class="stat success"><div class="stat-value">' + (sys.active_scans ? sys.active_scans.length : 0) + '</div><div class="stat-label">' + tr('Active Scans') + '</div></div>';
+            h += '<div class="stat ' + (sys.monitor_running ? 'success' : 'danger') + '"><div class="stat-value">' + (sys.monitor_running ? tr('ONLINE') : tr('OFFLINE')) + '</div><div class="stat-label">' + tr('Monitor') + '</div></div>';
+            h += '</div>';
             h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' + tr('Resource Usage') + '</span></div>';
             h += '<div class="gauge-row">' + buildGaugeHtml('cpu', tr('CPU')) + buildGaugeHtml('ram', tr('RAM')) + '</div>';
             h += '</div>';
-            h += '<div class="grid grid-4" style="margin-bottom:20px;">';
-            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.version || 'unknown') + '</div><div class="stat-label">Maldet Version</div></div>';
-            h += '<div class="stat"><div class="stat-value">' + escapeHtml(sys.signature_version || '?') + '</div><div class="stat-label">Signature Set</div></div>';
-            h += '<div class="stat ' + (sys.clamav_available ? 'success' : 'danger') + '"><div class="stat-value">' + escapeHtml(sys.clamav_version || '?') + '</div><div class="stat-label">ClamAV Status</div></div>';
-            h += '<div class="stat success"><div class="stat-value">' + (sys.active_scans ? sys.active_scans.length : 0) + '</div><div class="stat-label">Active Scans</div></div>';
-            h += '<div class="stat ' + (sys.monitor_running ? 'success' : 'danger') + '"><div class="stat-value">' + (sys.monitor_running ? 'ONLINE' : 'OFFLINE') + '</div><div class="stat-label">Monitor</div></div>';
+            h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' +
+                tr('Monitoring overview') + '</span></div>';
+            h += '<div class="grid grid-2"><div><strong>' + tr('Monitoring status') + '</strong><br>' +
+                '<span class="monitor-state ' + (sys.monitor_running ? 'is-running' : 'is-stopped') + '">' +
+                tr(sys.monitor_running ? 'RUNNING' : 'STOPPED') + '</span></div>';
+            h += '<div><strong>' + tr('events logged') + '</strong><br>' +
+                (monitorActivity && Number.isFinite(Number(monitorActivity.total_events))
+                    ? Number(monitorActivity.total_events) : tr('Unavailable')) + '</div></div>';
+            var scopeAllowsExtras = !monitorScope || monitorScope.scope !== 'webroots';
+            function monitorSettingLabel(enabled, available) {
+                if (!available) return tr('Unavailable');
+                return tr(enabled && sys.monitor_running ? 'Enabled' : 'Disabled');
+            }
+            h += '<div class="grid grid-2 monitoring-summary-settings">';
+            var scopeLabels = {
+                recursive: tr('All folders (recursive)'),
+                webroots: tr('Web folders only'),
+                custom: tr('Custom paths')
+            };
+            h += '<div><strong>' + tr('Users monitored') + '</strong><br>' +
+                '<span>' + monitorSettingLabel(
+                    !!(monitorUsers && Array.isArray(monitorUsers.users) &&
+                        monitorUsers.users.some(function(user) { return user.enabled; })),
+                    !!monitorUsers) + '</span>' +
+                (monitorScope && scopeLabels[monitorScope.scope]
+                    ? '<br><small class="form-help">' + tr('Scope: ') +
+                        escapeHtml(scopeLabels[monitorScope.scope]) + '</small>'
+                    : '') + '</div>';
+            h += '<div><strong>' + tr('Web server monitoring') + '</strong><br>' +
+                '<span>' + monitorSettingLabel(
+                    !!(monitorWeb && monitorWeb.autodetect === '1' && scopeAllowsExtras),
+                    !!monitorWeb && typeof monitorWeb.autodetect !== 'undefined') + '</span></div>';
+            h += '<div><strong>' + tr('Email folder monitoring') + '</strong><br>' +
+                '<span>' + monitorSettingLabel(
+                    !!(monitorMail && monitorMail.autodetect === '1' && scopeAllowsExtras),
+                    !!monitorMail && typeof monitorMail.autodetect !== 'undefined') + '</span></div>';
+            h += '<div><strong>' + tr('Extra monitored folders') + '</strong><br>' +
+                '<span>' + monitorSettingLabel(
+                    !!(monitorPaths && Array.isArray(monitorPaths.paths) &&
+                        monitorPaths.paths.length && scopeAllowsExtras),
+                    !!monitorPaths) + '</span>' +
+                (monitorPaths && Array.isArray(monitorPaths.paths)
+                    ? '<br><small class="form-help">' + monitorPaths.paths.length + '</small>'
+                    : '') + '</div></div>';
+            if (monitorActivity && Array.isArray(monitorActivity.entries) && monitorActivity.entries.length) {
+                var latestEvent = monitorActivity.entries[0];
+                h += '<p class="form-help">' + tr('Latest monitored activity') + ': <code>' +
+                    escapeHtml(latestEvent.file || '-') + '</code> ' +
+                    escapeHtml(latestEvent.event || '') + ' ' + escapeHtml(latestEvent.time || '') + '</p>';
+            }
+            h += '</div>';
+            h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' +
+                tr('Latest scan report') + '</span></div>';
+            if (reports === null) {
+                h += '<p style="padding:12px;color:var(--text-muted);">' + tr('Unable to load scan reports.') + '</p>';
+            } else if (!latestReport) {
+                h += '<p style="padding:12px;color:var(--text-muted);">' + tr('No scan reports found.') + '</p>';
+            } else {
+                var latestHits = Number(latestReport.total_hits);
+                if (!Number.isFinite(latestHits)) latestHits =
+                    Array.isArray(latestReport.hits) ? latestReport.hits.length : 0;
+                h += '<div class="grid grid-3"><div><strong>' + tr('Scan ID') + '</strong><br><code>' +
+                    escapeHtml(latestReport.scan_id || '-') + '</code></div>';
+                h += '<div><strong>' + tr('Path') + '</strong><br>' +
+                    escapeHtml(latestReport.path || '-') + '</div>';
+                h += '<div><strong>' + tr('Completed') + '</strong><br>' +
+                    escapeHtml(latestReport.completed ||
+                        (latestReport.completed_epoch ? fmtTime(latestReport.completed_epoch) : '-')) + '</div>';
+                h += '<div><strong>' + tr('Duration') + '</strong><br>' +
+                    escapeHtml(fmtDuration(latestReport.elapsed_seconds)) + '</div>';
+                h += '<div><strong>' + tr('Files') + '</strong><br>' +
+                    (Number(latestReport.total_files) || 0) + '</div>';
+                h += '<div><strong>' + tr('Hits') + '</strong><br>' + latestHits + '</div>';
+                h += '<div><strong>' + tr('Quarantined') + '</strong><br>' +
+                    (Number(latestReport.total_quarantined) || 0) + '</div></div>';
+            }
             h += '</div>';
             h += '<div class="card"><div class="card-header"><span class="card-title">System Information</span></div>';
             h += '<div class="grid grid-2"><div><table>';
@@ -1324,7 +1568,9 @@
         }, 500);
         _scanPreparing = true;
         _scanStartInFlight = true;
-        API.post('/scan', body).then(function(resp) {
+        // The backend may spend up to 60 seconds validating active scans and
+        // starting Maldet; keep the request alive long enough for that work.
+        API.post('/scan', body, { timeout: 70000 }).then(function(resp) {
             _scanPreparing = false;
             _scanStartInFlight = false;
             if (resp.scan_started) {
@@ -1562,7 +1808,7 @@
     }
 
     function restoreQuarantineFile(filename) {
-        if (!filename || !confirm('Restore ' + filename + '?')) return;
+        if (!filename || !confirm(tr('Restore ') + filename + '?')) return;
         var button = null;
         document.querySelectorAll('[data-action="quarantine-restore"]').forEach(function(candidate) {
             if (candidate.getAttribute('data-file') === filename) button = candidate;
@@ -1587,7 +1833,8 @@
     }
 
     function cleanQuarantineFile(filename) {
-        if (!filename || !confirm('Try to clean ' + filename + '?\n\nThe file is restored to its original location, cleaned with the matching maldet clean rule and rescanned. If cleaning fails, it is moved back to quarantine.')) return;
+        if (!filename || !confirm(tr('Try to clean ') + filename + '?\n\n' +
+                tr('The file is restored to its original location, cleaned with the matching maldet clean rule and rescanned. If cleaning fails, it is moved back to quarantine.'))) return;
         var button = null;
         document.querySelectorAll('[data-action="quarantine-clean"]').forEach(function(candidate) {
             if (candidate.getAttribute('data-file') === filename) button = candidate;
@@ -1617,7 +1864,8 @@
     }
 
     function deleteQuarantineFile(filename) {
-        if (!filename || !confirm('Permanently delete ' + filename + ' from quarantine?\n\nThis cannot be undone — the file will NOT be restored.')) return;
+        if (!filename || !confirm(tr('Permanently delete ') + filename + tr(' from quarantine?') +
+                '\n\n' + tr('This cannot be undone — the file will NOT be restored.'))) return;
         var button = null;
         document.querySelectorAll('[data-action="quarantine-delete"]').forEach(function(candidate) {
             if (candidate.getAttribute('data-file') === filename) button = candidate;
@@ -1640,16 +1888,45 @@
 
     function restoreAllQuarantineFiles() {
         var buttons = document.querySelectorAll('[data-action="quarantine-restore-all"]');
-        if (!buttons.length || !confirm('Restore all quarantined files?')) return;
+        if (!buttons.length || !confirm(tr('Restore all quarantined files?'))) return;
+        var filenames = Array.prototype.map.call(
+            document.querySelectorAll('[data-action="quarantine-restore"]'),
+            function(button) { return button.getAttribute('data-file'); }
+        ).filter(function(filename) { return !!filename; });
+        var restored = 0;
+        var failures = [];
         buttons.forEach(function(button) {
             button.disabled = true;
-            button.textContent = 'Restoring all...';
+            button.textContent = 'Restoring 0/' + filenames.length + '...';
         });
-        API.post('/quarantine/restore-all', {}).then(function(data) {
-            if (data.failed) {
-                toast('Restored ' + data.restored + '; failed: ' + data.failed, 'error');
+
+        filenames.reduce(function(queue, filename, index) {
+            return queue.then(function() {
+                buttons.forEach(function(button) {
+                    button.textContent = 'Restoring ' + (index + 1) + '/' + filenames.length + '...';
+                });
+                return API.post('/quarantine/restore', { file: filename }, { timeout: 40000 })
+                    .then(function(data) {
+                        if (data.returncode !== undefined &&
+                                data.returncode !== 0 && data.returncode !== 2) {
+                            throw new Error(data.stderr || data.stdout || 'Restore failed');
+                        }
+                        restored++;
+                    })
+                    .catch(function(err) {
+                        failures.push({ file: filename, error: err.message });
+                    });
+            });
+        }, Promise.resolve()).then(function() {
+            if (failures.length) {
+                var failedNames = failures.slice(0, 5).map(function(item) {
+                    return item.file;
+                }).join(', ');
+                var suffix = failures.length > 5 ? ', ...' : '';
+                toast('Restored ' + restored + '; failed: ' + failures.length +
+                    ' (' + failedNames + suffix + ')', 'error', 12000);
             } else {
-                toast('All quarantined files restored (' + data.restored + ')', 'success');
+                toast('All quarantined files restored (' + restored + ')', 'success');
             }
             Router.navigate('quarantine');
         }).catch(function(err) {
@@ -1787,7 +2064,8 @@
         }
         var labels = SCAN_ACTION_LABELS[action] || { idle: 'Retry', working: 'Working...' };
         if ((action === 'quarantine' || action === 'restore') &&
-            !confirm((action === 'quarantine' ? 'Quarantine' : 'Restore') + ' all detected files from scan ' + id + '?')) {
+            !confirm(tr((action === 'quarantine' ? 'Quarantine' : 'Restore') +
+                ' all detected files from scan ') + id + '?')) {
             return;
         }
         if (button) {
@@ -1822,12 +2100,13 @@
     }
 
     function discardScan(id) {
-        if (!confirm('Discard the checkpoint for scan ' + id + '? This cannot be undone and the scan will no longer be resumable.')) return;
+        if (!confirm(tr('Discard the checkpoint for scan ') + id +
+                tr('? This cannot be undone and the scan will no longer be resumable.'))) return;
         scanAction(id, 'kill');
     }
 
     function stopScan(id) {
-        if (!confirm('Stop scan ' + id + '?')) return;
+        if (!confirm(tr('Stop scan ') + id + '?')) return;
         scanAction(id, 'stop');
     }
 
@@ -1955,7 +2234,7 @@
     function openScheduleModal(id) {
         closeScheduleModal();
         var existing = id ? _schedulesCache[id] : null;
-        var s = existing || { name: '', path: '/home', scan_type: 'recent', days: 1, frequency: 'daily',
+        var s = existing || { name: '', path: '/home', scan_type: 'all', days: 1, frequency: 'daily',
             hour: 3, minute: 0, weekday: 0, cron_expr: '', enabled: true };
         var modal = document.createElement('div');
         modal.id = 'schedule-modal';
@@ -1971,11 +2250,18 @@
         h += '<div class="form-group"><label class="form-label">' + tr('Path') + '</label><div class="path-picker-row">' +
             '<input type="text" class="form-input" id="sch_path" value="' + escapeHtml(s.path) + '" placeholder="/var/www">' +
             '<button type="button" class="btn btn-ghost" data-action="folder-picker" data-target="sch_path">' + tr('Browse') + '</button></div></div>';
-        h += '<div class="form-group"><label class="form-label">' + tr('Scan type') + '</label>' +
-            '<select class="form-input" id="sch_scan_type"><option value="recent"' + (s.scan_type === 'recent' ? ' selected' : '') + '>' +
-            tr('Recent files only') + '</option><option value="all"' + (s.scan_type === 'all' ? ' selected' : '') + '>' +
-            tr('Full scan (all files)') + '</option></select></div>';
-        h += '<div class="form-group" id="sch_days_group"><label class="form-label">' + tr('Modified within (days)') + '</label>' +
+        h += '<div class="form-group"><label class="form-label">' + tr('Scan type') + '</label>';
+        if (existing) {
+            h += '<select class="form-input" id="sch_scan_type"><option value="recent"' + (s.scan_type === 'recent' ? ' selected' : '') + '>' +
+                tr('Recent files only') + '</option><option value="all"' + (s.scan_type === 'all' ? ' selected' : '') + '>' +
+                tr('Full scan (all files)') + '</option></select>';
+        } else {
+            h += '<input type="hidden" id="sch_scan_type" value="all"><div class="form-input">' +
+                tr('Full scan (all files)') + '</div>';
+        }
+        h += '</div>';
+        h += '<div class="form-group" id="sch_days_group"' + (s.scan_type === 'recent' ? '' : ' style="display:none"') +
+            '><label class="form-label">' + tr('Modified within (days)') + '</label>' +
             '<input type="number" min="1" class="form-input" id="sch_days" value="' + escapeHtml(s.days) + '"></div>';
         h += '<div class="form-group"><label class="form-label">' + tr('Frequency') + '</label>' +
             '<select class="form-input" id="sch_frequency"><option value="daily"' + (s.frequency === 'daily' ? ' selected' : '') + '>' +
@@ -2951,16 +3237,26 @@
 
     // ----- Maintenance -----
     function renderMaintenance() {
-        return '<div class="card"><div class="card-header"><span class="card-title">Maintenance</span></div>' +
-            '<button class="btn btn-warning" data-action="run-maint">Run Maintenance</button> ' +
-            '<button class="btn btn-danger" data-action="run-purge">Purge All Data</button></div>';
+        return '<div class="maintenance-grid">' +
+            '<section class="card maintenance-card"><div class="card-header"><span class="card-title">Maintenance tasks</span></div>' +
+            '<p class="maintenance-description">Run routine cleanup or remove Maldet data.</p>' +
+            '<div class="maintenance-actions">' +
+            '<button class="btn btn-warning" data-action="run-maint">Run Maintenance</button>' +
+            '<button class="btn btn-danger" data-action="run-purge">Purge All Data</button>' +
+            '</div></section>' +
+            '<section class="card maintenance-card"><div class="card-header"><span class="card-title">Service and server</span></div>' +
+            '<p class="maintenance-description">Restart the WebGUI or reboot the entire server.</p>' +
+            '<div class="maintenance-actions">' +
+            '<button class="btn btn-ghost" id="reload-gui-btn" type="button" title="Reload WebGUI" aria-label="Reload WebGUI">🔃 <span>Reload WebGUI</span></button>' +
+            '<button class="btn btn-danger" id="system-reboot-btn" type="button" title="Reboot Server" aria-label="Reboot Server">⏻ <span>Reboot Server</span></button>' +
+            '</div></section></div>';
     }
 
     function runMaint() {
         API.post('/maintenance', {}).then(function() { toast('Maintenance complete', 'success'); });
     }
     function runPurge() {
-        if (!confirm('Clear all logs, quarantine, and temp data?')) return;
+        if (!confirm(tr('Clear all logs, quarantine, and temp data?'))) return;
         API.post('/purge', {}).then(function() { toast('Purge complete', 'success'); });
     }
 
