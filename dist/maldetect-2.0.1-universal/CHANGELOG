@@ -37,6 +37,61 @@ v2.0.2 | May 12 2026:
       card auto-refreshes every 3s (newest first, event-type coloring,
       timer stopped on page leave); entries are the create/move/modify
       events queued for the monitor's scan batches
+[New] gui: Monitoring page monitored-folders card — add or remove extra
+      folders watched in real time alongside the primary monitor mode;
+      GET/PUT /api/monitor/paths persists one absolute directory per line in
+      monitor_paths_extra (additive to the users/path mode); entries must be
+      existing absolute paths and are normalized, deduplicated and sorted;
+      changes take effect after Reload, and an unreadable file shows a
+      warning instead of an empty list so Save cannot wipe the entries
+[New] gui: reboot countdown auto-refreshes the page — when the 01:00 reboot
+      timer reaches zero the client polls the public /api/auth/status health
+      endpoint every REBOOT_POLL_INTERVAL_SECONDS (5s) until the host answers
+      again, then window.location.reload() reconnects the browser to the
+      restarted WebGUI instead of leaving a dead page open; only a successful
+      probe after the host was seen going down (or past a short grace window,
+      REBOOT_POLL_GRACE_SECONDS = 20) triggers the reload, the poller is
+[New] Email folder autodetection and monitoring (--mail-detect,
+      inotify_maildir_autodetect) — new `maldet --mail-detect` reports the
+      running mail server (Postfix, Exim, Dovecot, Sendmail, Courier, Cyrus)
+      and the mail folders found in the well-known spool/Maildir locations plus
+      the ones read from the server's own configuration (Dovecot
+      mail_location, Postfix virtual_mailbox_base, Courier/Cyrus maildir:).
+      Per-user variables are trimmed to their variable-free prefix so
+      "/var/vmail/%d/%n/Maildir" resolves to the existing "/var/vmail"; new
+      GET/POST /api/monitor/mail plus a Monitoring-page "Email folder
+      detection" card with a per-host toggle let the admin decide whether the
+      detected mail folders are watched; enabled folders are added IN ADDITION
+      to the current scope in `maldet --monitor users` mode (nothing is
+      replaced, skipped in webroot-only mode), deduplicated against the existing
+      watch list, and take effect after Reload
+      scheduled at most once (repeated zero-ticks do not stack) and it gives up
+      after REBOOT_POLL_MAX_SECONDS (600s) without a reload
+[New] monitor: detect email (maildir) folders and allow opting them into
+      monitoring — process-based detection of the running mail server
+      (Dovecot, Postfix, Courier, Cyrus, Exim, Sendmail) with folders read
+      from its own configuration, `maldet --mail-detect` to preview, the
+      new inotify_maildir_autodetect option (allowlisted in lmd_config.sh)
+      wiring the detected folders into the `users` watch list (additive,
+      deduped, skipped in webroot-only mode) and a "Email folder detection"
+      card in the WebGUI backed by GET/POST /api/monitor/mail
+[New] gui: monitored folders card gets a "Browse" button that opens the
+      server-side folder picker, which queues the chosen folder directly
+      in the pending list
+[New] gui: "Reload WebGUI" restarts the maldet-gui service — POST
+      /api/system/reload (root + authenticated + same-origin + JSON,
+      mirroring /api/system/reboot) schedules a detached
+      `systemctl restart maldet-gui.service` after 10s so the response
+      reaches the browser first; the UI shows a 00:10 regressive countdown
+      and reuses the reboot health-probe to reload the page automatically
+      once the service is back
+[Fix] json-report: `maldet --json-report list` only listed reports present
+      in the session index, silently hiding scan reports written directly
+      to the filesystem as session.tsv.<scanid>; the renderer now emits
+      those unindexed reports (flagged "tsv-unindexed") so every existing
+      report shows up in the WebGUI scan list
+[Chg] remove files/clean/gzbase64.inject.unclassed (unreferenced cleaner;
+      base64.inject.unclassed remains)
 
   -- Changes --
 
@@ -59,6 +114,15 @@ v2.0.2 | May 12 2026:
 
   -- Bug Fixes --
 
+[Fix] report list: `maldet --format json --report list` (and therefore the
+      WebGUI Reports page via /api/scans) now also lists session.tsv.* files
+      that are missing from session.index, mirroring the sweep _view_session_list
+      already performs. session.index is append-only and only fully rebuilt when
+      absent, so a scan whose index append was lost (ENOSPC, SIGKILL between the
+      TSV and index writes, a restored backup) left its report invisible in the
+      GUI; unindexed entries are flagged with "source": "tsv-unindexed" in the
+      JSON payload, .gz report files are ignored, and already-listed sessions
+      are not duplicated
 [Fix] quarantine: symlink TOCTOU guards across scan-to-quarantine
       (_batch_quarantine pre-filter + per-file, _quarantine_file, quar_hitlist
       callers), restore (_validate_restore_path), and clean-failure

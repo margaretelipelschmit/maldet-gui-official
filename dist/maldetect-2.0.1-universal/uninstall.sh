@@ -1,19 +1,11 @@
 #!/usr/bin/env bash
-#
 ##
 # Linux Malware Detect v2.0.1
 #             (C) 2002-2026, R-fx Networks <proj@rfxn.com>
 #             (C) 2026, Ryan MacDonald <ryan@rfxn.com>
 # This program may be freely redistributed under the terms of the GNU GPL v2
 ##
-##
-# Linux Malware Detect (WebGUI - maldet-gui v1.0.0)
-#             (C) 2011-2026, bithostel <hostmaster@bithostel.com.br>
-#             (C) 2026, Fabio Schmit <https://bithostel.com.br>
-# This program may be freely redistributed under the terms of the GNU GPL v2
-#                      Universal Linux Server Setup v1.0.0
-##
-#
+# uninstall.sh — interactive LMD removal (installed-path entry point)
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:$PATH
 inspath=/usr/local/maldetect

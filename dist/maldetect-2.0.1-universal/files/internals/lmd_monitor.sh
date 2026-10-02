@@ -341,6 +341,216 @@ webserver_detect_report() {
 	fi
 	return 1
 }
+# ── Mail server / mail folder detection ───────────────────────────────────────
+# Backs the inotify_maildir_autodetect option (monitor mode) and the
+# `maldet --mail-detect` diagnostic command. Detection is process-based
+# (pgrep); mail folders are taken from the well-known spool/Maildir
+# locations plus the mail server's own configuration.
+
+_monitor_mail_running() {
+	# $1=canonical server key (postfix|exim|dovecot|sendmail|qmail|courier|cyrus)
+	# Returns 0 when a matching process is running, else 1.
+	local _ms="$1" _p _bins
+	case "$_ms" in
+		postfix)
+			# The Postfix master usually runs as its own binary named
+			# "master"; require the config directory to avoid matching an
+			# unrelated process with the same name.
+			pgrep -f 'postfix/master' >/dev/null 2>&1 && return 0
+			pgrep -x master >/dev/null 2>&1 && [ -d /etc/postfix ] && return 0
+			return 1
+			;;
+		exim)     _bins="exim exim4" ;;
+		dovecot)  _bins="dovecot" ;;
+		sendmail) _bins="sendmail" ;;
+		qmail)    _bins="qmail-send" ;;
+		courier)  _bins="courier-imapd courier-pop3d" ;;
+		cyrus)    _bins="master cyrus-master" ;;
+		*)        return 1 ;;
+	esac
+	for _p in $_bins; do
+		if pgrep -x "$_p" >/dev/null 2>&1; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+_monitor_detect_mail() {
+	# Print the canonical name of each running mail server, one per line.
+	# Order: most common shared-hosting stacks first.
+	local _ms
+	for _ms in postfix exim dovecot sendmail qmail courier cyrus; do
+		if _monitor_mail_running "$_ms"; then
+			printf '%s\n' "$_ms"
+		fi
+	done
+}
+
+_monitor_mail_conf_files() {
+	# $1=filesystem root prefix (default "/")
+	# Print candidate mail server configuration files (existing only).
+	local _root="${1:-/}" _f
+	case "$_root" in
+		*/) ;;
+		*) _root="${_root}/" ;;
+	esac
+	for _f in \
+		"${_root}etc/dovecot/dovecot.conf" \
+		"${_root}etc/postfix/main.cf" \
+		"${_root}etc/exim4/update-exim4.conf.conf" \
+		"${_root}etc/exim/exim.conf" \
+		"${_root}etc/imapd.conf" \
+		"${_root}etc/cyrus.conf"; do
+		[ -f "$_f" ] && printf '%s\n' "$_f"
+	done
+	for _f in \
+		"${_root}etc/dovecot/conf.d" \
+		"${_root}etc/dovecot/dovecot.conf.d"; do
+		[ -d "$_f" ] && find "$_f" -maxdepth 1 -type f 2>/dev/null
+	done
+}
+
+_monitor_mail_dirs() {
+	# $1=filesystem root prefix (default "/")
+	# Print raw mail folder paths: the well-known spool/Maildir locations
+	# plus the roots read from the mail server configuration.
+	local _root="${1:-/}" _f _loc _path
+	case "$_root" in
+		*/) ;;
+		*) _root="${_root}/" ;;
+	esac
+	# Well-known server-side spool / Maildir roots.
+	for _path in \
+		"${_root}var/mail" \
+		"${_root}var/spool/mail" \
+		"${_root}var/spool/postfix" \
+		"${_root}var/spool/imap" \
+		"${_root}var/spool/courier" \
+		"${_root}var/vmail" \
+		"${_root}var/mail/vhosts" \
+		"${_root}var/qmail/mailnames" \
+		"${_root}srv/imap" \
+		"${_root}usr/local/vmail"; do
+		printf '%s\n' "$_path"
+	done
+	# Dovecot mail_location (e.g. maildir:/var/vmail/%d/%n or ~/Maildir).
+	# Keep only the path segment: drop the storage-driver prefix and any
+	# trailing extra options after the path.
+	while IFS= read -r _f; do
+		[ -n "$_f" ] || continue
+		grep -hoiE '^[[:space:]]*mail_location[[:space:]]*=[[:space:]]*.*' "$_f" 2>/dev/null | \
+			sed -E 's/^[^=]*=[[:space:]]*//' | \
+			while IFS= read -r _loc; do
+				[ -n "$_loc" ] || continue
+				_path="${_loc#*:}"
+				_path="${_path%%:*}"
+				printf '%s\n' "$_path"
+			done
+	done < <(_monitor_mail_conf_files "$_root")
+	# Courier IMAP / Cyrus IMAP advertise their spool root as a bare
+	# "maildir:/srv/imap/<domain>" key. Take the storage-driver prefix off the
+	# same way as the Dovecot key above.
+	while IFS= read -r _f; do
+		[ -n "$_f" ] || continue
+		grep -hoiE '^[[:space:]]*maildir[[:space:]]*:[[:space:]]*[^[:space:]]+' "$_f" 2>/dev/null | \
+			sed -E 's/^[[:space:]]*[Mm]aildir[[:space:]]*:[[:space:]]*//' | \
+			_monitor_ws_unquote
+	done < <(_monitor_mail_conf_files "$_root")
+	# Postfix virtual_mailbox_base (the root of virtual mailboxes).
+	while IFS= read -r _f; do
+		[ -n "$_f" ] || continue
+		case "$_f" in
+			*/main.cf)
+				grep -hoiE '^[[:space:]]*virtual_mailbox_base[[:space:]]*=[[:space:]]*.*' "$_f" 2>/dev/null | \
+					sed -E 's/^[^=]*=[[:space:]]*//' | \
+					awk '{print $1}' | _monitor_ws_unquote
+				;;
+		esac
+	done < <(_monitor_mail_conf_files "$_root")
+}
+
+_monitor_collect_mail_dirs() {
+	# $1=filesystem root prefix (default "/")
+	# Print existing absolute mail folders (deduped). Per-user variables
+	# (%), home shortcuts (~), globs (*) and shell vars ($) are trimmed back
+	# to their variable-free prefix, so e.g. "/var/vmail/%d/%n/Maildir"
+	# yields "/var/vmail".
+	local _root="${1:-/}" _md
+	case "$_root" in
+		*/) ;;
+		*) _root="${_root}/" ;;
+	esac
+	_monitor_mail_dirs "$_root" | while IFS= read -r _md; do
+		[ -n "$_md" ] || continue
+		case "$_md" in
+			/*) ;;
+			*) continue ;;
+		esac
+		case "$_md" in
+			*%*|*'$'*|*'*'*|*'~'*)
+				_md="${_md%%\%*}"
+				_md="${_md%%\$*}"
+				_md="${_md%%\**}"
+				_md="${_md%%\~*}"
+				;;
+		esac
+		[ -n "$_md" ] || continue
+		if [ "${#_md}" -gt 1 ]; then
+			_md="${_md%/}"
+		fi
+		[ "${#_md}" -gt 1 ] || continue
+		case "$_root" in
+			/) ;;
+			*) case "$_md" in "$_root"*) ;; *) continue ;; esac ;;
+		esac
+		[ -d "$_md" ] || continue
+		printf '%s\n' "$_md"
+	done | awk '!seen[$0]++'
+}
+
+mail_detect_report() {
+	# `maldet --mail-detect`: report the running mail server(s) and their
+	# detected mail folders, plus the inotify_maildir_autodetect state.
+	# Returns 0 when a mail server or mail folder was detected, else 1.
+	local _ms _d _dirs _count _detected=0 _server=0
+	while IFS= read -r _ms; do
+		[ -n "$_ms" ] || continue
+		_server=1
+		_detected=1
+		echo "mail server detected: $_ms"
+	done < <(_monitor_detect_mail)
+	if [ "$_server" -eq 0 ]; then
+		echo "mail server detected: none"
+	fi
+	_dirs=$(_monitor_collect_mail_dirs "")
+	_count=0
+	while IFS= read -r _d; do
+		[ -n "$_d" ] || continue
+		if [ "$_count" -eq 0 ]; then
+			echo "mail folders:"
+		fi
+		_count=$((_count + 1))
+		echo "  $_d"
+	done <<< "$_dirs"
+	if [ "$_count" -eq 0 ]; then
+		echo "mail folders: none found"
+	else
+		_detected=1
+	fi
+	echo ""
+	echo "inotify_maildir_autodetect=\"${inotify_maildir_autodetect:-0}\""
+	if [ "${inotify_maildir_autodetect:-0}" = "1" ]; then
+		echo 'detected mail folders are added to `maldet --monitor users`'
+	else
+		echo 'hint: set inotify_maildir_autodetect="1" in conf.maldet to monitor detected mail folders'
+	fi
+	if [ "$_detected" -eq 1 ]; then
+		return 0
+	fi
+	return 1
+}
+
 _monitor_load_ignore_inotify_union() {
 	# Union user ignore_inotify + ignore_inotify.defaults. Emit prefixed
 	# tuples ("u:<entry>" / "d:<entry>") for downstream semantic dispatch.
@@ -823,6 +1033,29 @@ monitor_init() {
 			done < <(_monitor_detect_webserver)
 			if [ "$_ws_detected" = "0" ]; then
 				eout "{mon} no running web server detected (inotify_docroot_autodetect=1)" 1
+			fi
+		fi
+
+		# Optional: add detected mail folders (opt-in, additive).
+		# See inotify_maildir_autodetect in conf.maldet. Folders are only
+		# reported by a running mail server (the well-known spools alone are
+		# not enough), so a host without mail is not spammed with guesses.
+		if [ "${inotify_maildir_autodetect:-0}" = "1" ]; then
+			local _mail_detected=0 _ms _md
+			while IFS= read -r _ms; do
+				[ -n "$_ms" ] || continue
+				_mail_detected=1
+				eout "{mon} detected mail server: $_ms" 1
+			done < <(_monitor_detect_mail)
+			if [ "$_mail_detected" = "1" ]; then
+				while IFS= read -r _md; do
+					[ -n "$_md" ] || continue
+					grep -Fqx -- "$_md" "$_inotify_fpaths" && continue
+					echo "$_md" >> "$_inotify_fpaths"
+					eout "{mon} added $_md to inotify monitoring array (mail folder)" 1
+				done < <(_monitor_collect_mail_dirs "")
+			else
+				eout "{mon} no running mail server detected (inotify_maildir_autodetect=1)" 1
 			fi
 		fi
 
