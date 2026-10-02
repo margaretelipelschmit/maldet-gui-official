@@ -1732,7 +1732,11 @@ class MaldetAPI:
             out, err, rc = run_maldet(args, timeout=60)
             if rc not in (0, 2) and "scan in progress" not in (out + err).lower():
                 SCAN_START_RESERVATIONS.pop(path, None)
-        ok = (rc == 0) or ("scan in progress" in (out + err).lower())
+        # Maldet uses exit code 2 for a valid scan result with detections.
+        # Treat it as a successful start just like other scan endpoints do;
+        # the background worker may already be running even though detections
+        # cause the CLI to return a non-zero status.
+        ok = rc in (0, 2) or ("scan in progress" in (out + err).lower())
         if ok:
             return 200, {"message": "Scan started in background",
                          "scan_started": True,

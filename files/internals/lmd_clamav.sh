@@ -423,16 +423,53 @@ _clamd_restore_throttle() {
 	) 201>"$_lockfile"
 }
 
+_clamd_run_pid_tracked() {
+	local _filelist="$1" _results="$2" _pid_file="$3"
+	local _scan_prefix="$nice_command" _wrapped_prefix="" _scan_pid _limit_pid=""
+	local _scan_args=(--infected --no-summary -f "$_filelist")
+
+	# cpulimit's command-launch form may detach/reparent the scanner on some
+	# versions. Lifecycle tracking must wait for the scanner PID itself, so
+	# retain nice/ionice here and attach cpulimit to the resulting PID.
+	if [ -n "$cpulimit" ] && [ "${scan_cpulimit:-0}" -gt 0 ] 2>/dev/null; then
+		_wrapped_prefix="$cpulimit -l $scan_cpulimit --"
+		if [ "$_scan_prefix" = "$_wrapped_prefix" ]; then
+			_scan_prefix=""
+		else
+			case "$_scan_prefix" in
+				"$_wrapped_prefix "*)
+					_scan_prefix="${_scan_prefix#"$_wrapped_prefix "}"
+					;;
+			esac
+		fi
+	fi
+
+	$_scan_prefix "$clamscan" $clamopts "${_scan_args[@]}" \
+		> "$_results" 2>> "$clamscan_log" &
+	_scan_pid=$!
+	printf '%s\n' "$_scan_pid" > "$_pid_file"
+
+	if [ -n "$cpulimit" ] && [ -f "$cpulimit" ] && [ "${scan_cpulimit:-0}" -gt 0 ] 2>/dev/null; then
+		"$cpulimit" -p "$_scan_pid" -l "$scan_cpulimit" -z >/dev/null 2>&1 &
+		_limit_pid=$!
+	fi
+
+	wait "$_scan_pid"
+	local _scan_rc=$?
+	if [ -n "$_limit_pid" ]; then
+		kill "$_limit_pid" 2>/dev/null || true
+		wait "$_limit_pid" 2>/dev/null || true
+	fi
+	return "$_scan_rc"
+}
+
 _clamd_retry_scan() {
 	local _filelist="$1" _results="${2:-$clamscan_results}" _pid_file="${3:-}"
 	if [ "$scan_clamd_remote" == "1" ] && [ -f "$remote_clamd_config" ]; then
 		local try=0
 		while [ $try -le $remote_clamd_max_retry ]; do
 			if [ -n "$_pid_file" ]; then
-				# Launch with PID capture for lifecycle management
-				$nice_command $clamscan $clamopts --infected --no-summary -f "$_filelist" > "$_results" 2>> "$clamscan_log" &
-				echo "$!" > "$_pid_file"
-				wait "$!"
+				_clamd_run_pid_tracked "$_filelist" "$_results" "$_pid_file"
 				clamscan_return=$?
 			else
 				$nice_command $clamscan $clamopts --infected --no-summary -f "$_filelist" > "$_results" 2>> "$clamscan_log"
@@ -448,10 +485,7 @@ _clamd_retry_scan() {
 		done
 	else
 		if [ -n "$_pid_file" ]; then
-			# Launch with PID capture for lifecycle management
-			$nice_command $clamscan $clamopts --infected --no-summary -f "$_filelist" > "$_results" 2>> "$clamscan_log" &
-			echo "$!" > "$_pid_file"
-			wait "$!"
+			_clamd_run_pid_tracked "$_filelist" "$_results" "$_pid_file"
 			clamscan_return=$?
 		else
 			$nice_command $clamscan $clamopts --infected --no-summary -f "$_filelist" > "$_results" 2>> "$clamscan_log"

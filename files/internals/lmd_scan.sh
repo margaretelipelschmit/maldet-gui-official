@@ -495,11 +495,9 @@ _resolve_worker_count() {
 	local _count="${scan_workers:-auto}"
 	if [ "$_count" == "auto" ] || [ "$_count" -le 0 ] 2>/dev/null; then  # auto or 0 (legacy)
 		_count=$(nproc 2>/dev/null || grep -E -c '^processor' /proc/cpuinfo 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
-		# Always use at most half of the available CPU cores so the scan
-		# never saturates the whole host, regardless of core count.
-		_count=$((_count / 2))
-		if [ "$_count" -lt 1 ]; then _count=1; fi
-		if [ "$_count" -gt 8 ]; then _count=8; fi
+		# Use a single worker for automatic native scans to minimize CPU
+		# contention; explicit scan_workers settings remain honored.
+		_count=1
 	fi
 	if [ "$_count" -gt 8 ]; then _count=8; fi
 	if [ "$1" -le "$_count" ]; then _count="$1"; fi
@@ -581,9 +579,19 @@ _scan_run_native() {
 			_nworkers=$(_resolve_worker_count "$_md5_file_count")
 			_scan_progress "md5" "$_md5_file_count files"
 			if [ "$_nworkers" -le 1 ]; then
-				# Single worker: subshell isolates exit 3/4/5 from lifecycle sentinels
-				( _hash_batch_worker "$md5sum" "md5" "$_md5_batch_flist" "$runtime_md5" "" "$scanid" ) > "$tmpdir/.md5_worker.$_scan_ns_pid.0"
-				case $? in 3|4|5) return 1 ;; esac
+				local _md5_progress_dir _md5_pfile _md5_worker_pid
+				_md5_progress_dir=$(mktemp -d "$tmpdir/.md5_progress.$_scan_ns_pid.XXXXXX")
+				_md5_pfile="$_md5_progress_dir/0"
+				_hash_batch_worker "$md5sum" "md5" "$_md5_batch_flist" "$runtime_md5" \
+					"$_md5_pfile" "$scanid" \
+					> "$tmpdir/.md5_worker.$_scan_ns_pid.0" 2>/dev/null &
+				_md5_worker_pid=$!
+				_scan_throttle_worker_pid "$_md5_worker_pid"
+				if ! _wait_workers_with_progress "md5" "$_md5_file_count" "$_md5_progress_dir" "$_md5_worker_pid"; then
+					_scan_progress_clear
+					eout "{scan} worker detected lifecycle signal, aborting scan" 1
+					return 1
+				fi
 			else
 				# Multi-worker: round-robin split and background
 				local _md5_chunk_prefix _w _md5_progress_dir _md5_pfile
@@ -665,9 +673,19 @@ _scan_run_native() {
 			_nworkers=$(_resolve_worker_count "$_sha256_file_count")
 			_scan_progress "sha256" "$_sha256_file_count files"
 			if [ "$_nworkers" -le 1 ]; then
-				# Single worker: subshell isolates exit 3/4/5 from lifecycle sentinels
-				( _hash_batch_worker "$sha256sum" "sha256" "$_sha256_batch_flist" "$runtime_sha256" "" "$scanid" ) > "$tmpdir/.sha256_worker.$_scan_ns_pid.0"
-				case $? in 3|4|5) return 1 ;; esac
+				local _sha256_progress_dir _sha256_pfile _sha256_worker_pid
+				_sha256_progress_dir=$(mktemp -d "$tmpdir/.sha256_progress.$_scan_ns_pid.XXXXXX")
+				_sha256_pfile="$_sha256_progress_dir/0"
+				_hash_batch_worker "$sha256sum" "sha256" "$_sha256_batch_flist" "$runtime_sha256" \
+					"$_sha256_pfile" "$scanid" \
+					> "$tmpdir/.sha256_worker.$_scan_ns_pid.0" 2>/dev/null &
+				_sha256_worker_pid=$!
+				_scan_throttle_worker_pid "$_sha256_worker_pid"
+				if ! _wait_workers_with_progress "sha256" "$_sha256_file_count" "$_sha256_progress_dir" "$_sha256_worker_pid"; then
+					_scan_progress_clear
+					eout "{scan} worker detected lifecycle signal, aborting scan" 1
+					return 1
+				fi
 			else
 				local _sha256_chunk_prefix _w _sha256_progress_dir _sha256_pfile
 				_sha256_chunk_prefix="$tmpdir/.sha256_chunk.$_scan_ns_pid"

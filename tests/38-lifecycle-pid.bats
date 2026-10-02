@@ -138,6 +138,58 @@ SCRIPT
     rm -rf "$test_tmpdir"
 }
 
+# bats test_tags=lifecycle,pid,clamav
+@test "lifecycle-pid: cpulimit cannot detach scanner from tracked scan lifecycle" {
+    _source_lmd_stack
+    local test_tmpdir
+    test_tmpdir=$(mktemp -d)
+
+    local fake_clamscan="$test_tmpdir/fake_clamscan"
+    local fake_cpulimit="$test_tmpdir/fake_cpulimit"
+    local pid_file="$test_tmpdir/scanner.pid"
+    cat > "$fake_clamscan" <<'SCRIPT'
+#!/bin/bash
+exec sleep 30
+SCRIPT
+    cat > "$fake_cpulimit" <<'SCRIPT'
+#!/bin/bash
+if [ "$1" = "-p" ]; then
+    target_pid="$2"
+    while kill -0 "$target_pid" 2>/dev/null; do sleep 0.02; done
+fi
+SCRIPT
+    chmod +x "$fake_clamscan" "$fake_cpulimit"
+
+    clamscan="$fake_clamscan"
+    clamopts=""
+    cpulimit="$fake_cpulimit"
+    scan_cpulimit=50
+    nice_command="$fake_cpulimit -l 50 --"
+    scan_clamd_remote=0
+    clamscan_log="$test_tmpdir/clam.log"
+    touch "$clamscan_log"
+    clamscan_results="$test_tmpdir/results"
+    touch "$clamscan_results"
+    local filelist="$test_tmpdir/filelist"
+    touch "$filelist"
+
+    _clamd_retry_scan "$filelist" "$clamscan_results" "$pid_file" &
+    local scan_wrapper_pid=$!
+    local attempts=0
+    while [ ! -s "$pid_file" ] && [ "$attempts" -lt 50 ]; do
+        sleep 0.02
+        attempts=$((attempts + 1))
+    done
+    [ -s "$pid_file" ]
+    local scanner_pid
+    read -r scanner_pid < "$pid_file"
+    kill -0 "$scanner_pid"
+    kill -0 "$scan_wrapper_pid"
+    kill "$scanner_pid"
+    wait "$scan_wrapper_pid" 2>/dev/null || true
+    rm -rf "$test_tmpdir"
+}
+
 # === scan_stage_yara scanid parameter passthrough ===
 
 # bats test_tags=lifecycle,pid,yara
