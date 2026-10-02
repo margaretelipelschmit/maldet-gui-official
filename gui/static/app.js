@@ -130,6 +130,255 @@
         setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, duration);
     }
 
+    // ----- Reboot Countdown -----
+    // The backend schedules `shutdown -r +1`, so surface a visible 1-minute
+    // regressive timer as soon as the reboot is accepted. The deadline is
+    // stored in sessionStorage so a page reload resumes the countdown instead
+    // of restarting it from 01:00.
+    var REBOOT_DEADLINE_KEY = 'maldet.gui.rebootDeadline';
+    var REBOOT_COUNTDOWN_SECONDS = 60;
+    // The "Reload WebGUI" button restarts the maldet-gui service after a short
+    // delay, so show a matching countdown before the page reconnects.
+    var GUI_RELOAD_DEADLINE_KEY = 'maldet.gui.reloadDeadline';
+    var GUI_RELOAD_COUNTDOWN_SECONDS = 10;
+    var REBOOT_COUNTDOWN_LABELS = {
+        id: 'reboot-countdown',
+        aria: 'System reboot scheduled',
+        icon: '⏻',
+        title: 'System reboot scheduled',
+        text: 'The server will restart in',
+        hint: 'Active scans and connections will be interrupted.'
+    };
+    var RELOAD_COUNTDOWN_LABELS = {
+        id: 'reload-countdown',
+        aria: 'WebGUI restart scheduled',
+        icon: '🔃',
+        title: 'WebGUI restart scheduled',
+        text: 'The WebGUI will restart in',
+        hint: 'The page reconnects automatically when the service is back.'
+    };
+    // After the countdown reaches zero the service goes down. Instead of
+    // guessing how long that takes, poll the public health endpoint until the
+    // WebGUI answers again and then refresh the page automatically.
+    var REBOOT_POLL_INTERVAL_SECONDS = 5;
+    var REBOOT_POLL_GRACE_SECONDS = 20;   // let the host go down before trusting a first "up"
+    var REBOOT_POLL_MAX_SECONDS = 600;    // stop probing after 10 minutes without success
+    var REBOOT_POLL_TIMEOUT_MS = 3000;    // per-request timeout for the health probe
+    var _rebootCountdownOverlay = null;
+    var _rebootCountdownTimerEl = null;
+    var _rebootCountdownTextEl = null;
+    var _rebootCountdownInterval = null;
+    var _rebootCountdownDeadline = 0;
+    var _countdownLabels = null;
+    var _countdownStorageKey = REBOOT_DEADLINE_KEY;
+    var _rebootPollTimer = null;
+    var _rebootPollStartedAt = 0;
+    var _rebootPollSawDown = false;
+
+    function readCountdownDeadline(key) {
+        try {
+            return parseInt(sessionStorage.getItem(key), 10) || 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+    function writeCountdownDeadline(key, deadline) {
+        try { sessionStorage.setItem(key, String(deadline)); } catch (e) {}
+    }
+    function clearCountdownDeadline(key) {
+        try { sessionStorage.removeItem(key); } catch (e) {}
+    }
+    function formatRebootCountdown(totalSeconds) {
+        totalSeconds = Math.max(0, Math.floor(totalSeconds));
+        var minutes = Math.floor(totalSeconds / 60);
+        var seconds = totalSeconds % 60;
+        return (minutes < 10 ? '0' : '') + minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
+    }
+    function renderCountdownOverlay(labels) {
+        // Only one countdown is ever shown at a time; if a different one is on
+        // screen, replace it before building this one.
+        if (_rebootCountdownOverlay && _countdownLabels === labels) return;
+        if (_rebootCountdownOverlay) {
+            var previous = _rebootCountdownOverlay.parentNode;
+            if (previous && previous.removeChild) previous.removeChild(_rebootCountdownOverlay);
+        }
+        _countdownLabels = labels;
+        var overlay = document.createElement('div');
+        overlay.id = labels.id;
+        overlay.className = 'reboot-countdown-overlay';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-live', 'assertive');
+        overlay.setAttribute('aria-label', tr(labels.aria));
+        var card = document.createElement('div');
+        card.className = 'reboot-countdown-card';
+        var icon = document.createElement('div');
+        icon.className = 'reboot-countdown-icon';
+        icon.textContent = labels.icon;
+        var title = document.createElement('div');
+        title.className = 'reboot-countdown-title';
+        title.textContent = tr(labels.title);
+        var text = document.createElement('div');
+        text.className = 'reboot-countdown-text';
+        text.textContent = tr(labels.text);
+        var timer = document.createElement('div');
+        timer.className = 'reboot-countdown-timer';
+        timer.id = 'reboot-countdown-timer';
+        timer.setAttribute('role', 'timer');
+        var hint = document.createElement('div');
+        hint.className = 'reboot-countdown-hint';
+        hint.textContent = tr(labels.hint);
+        card.appendChild(icon);
+        card.appendChild(title);
+        card.appendChild(text);
+        card.appendChild(timer);
+        card.appendChild(hint);
+        overlay.appendChild(card);
+        (document.body || document.documentElement).appendChild(overlay);
+        _rebootCountdownOverlay = overlay;
+        _rebootCountdownTimerEl = timer;
+        _rebootCountdownTextEl = text;
+    }
+    function updateRebootCountdown() {
+        if (!_rebootCountdownTimerEl) return;
+        var remaining = Math.max(0, Math.ceil((_rebootCountdownDeadline - Date.now()) / 1000));
+        _rebootCountdownTimerEl.textContent = formatRebootCountdown(remaining);
+        if (remaining <= 0) {
+            if (_rebootCountdownTextEl) _rebootCountdownTextEl.textContent = tr('Restarting now...');
+            clearCountdownDeadline(_countdownStorageKey);
+            if (_rebootCountdownInterval) {
+                clearInterval(_rebootCountdownInterval);
+                _rebootCountdownInterval = null;
+            }
+            scheduleRebootReloadPoll();
+        }
+    }
+    // The timer hit zero and the host is going down for a reboot. Poll the
+    // public /api/auth/status endpoint until the WebGUI answers again, then
+    // refresh the page so the browser reconnects on its own instead of leaving
+    // a dead page open.
+    function scheduleRebootReloadPoll() {
+        if (_rebootPollTimer) return;
+        _rebootPollStartedAt = Date.now();
+        _rebootPollSawDown = false;
+        _rebootPollTimer = setInterval(pollRebootServer, REBOOT_POLL_INTERVAL_SECONDS * 1000);
+    }
+    function stopRebootReloadPoll() {
+        if (!_rebootPollTimer) return;
+        clearInterval(_rebootPollTimer);
+        _rebootPollTimer = null;
+    }
+    // Lightweight reachability probe to the public health endpoint. Kept separate
+    // from API._fetch so it never triggers the auth screen or the GET retry
+    // backoff while the host is rebooting.
+    function probeRebootServer(callback) {
+        var xhr;
+        try {
+            xhr = new XMLHttpRequest();
+        } catch (e) {
+            callback(false);
+            return;
+        }
+        var settled = false;
+        var finish = function(up) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            callback(up);
+        };
+        var timer = setTimeout(function() {
+            try { xhr.abort(); } catch (e) {}
+            finish(false);
+        }, REBOOT_POLL_TIMEOUT_MS);
+        xhr.open('GET', API.base + '/auth/status', true);
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== 4) return;
+            finish(xhr.status === 200);
+        };
+        xhr.onerror = function() { finish(false); };
+        xhr.send();
+    }
+    function pollRebootServer() {
+        probeRebootServer(function(up) {
+            var elapsed = Date.now() - _rebootPollStartedAt;
+            // Only trust an "up" answer once the host has actually gone down, or
+            // after the grace window in case the reboot finished faster than our
+            // first probe.
+            if (up && (_rebootPollSawDown || elapsed >= REBOOT_POLL_GRACE_SECONDS * 1000)) {
+                stopRebootReloadPoll();
+                window.location.reload();
+                return;
+            }
+            if (!up) _rebootPollSawDown = true;
+            if (elapsed >= REBOOT_POLL_MAX_SECONDS * 1000) stopRebootReloadPoll();
+        });
+    }
+    function beginCountdown(deadline, labels, storageKey) {
+        _rebootCountdownDeadline = deadline;
+        _countdownStorageKey = storageKey;
+        writeCountdownDeadline(storageKey, deadline);
+        renderCountdownOverlay(labels);
+        if (_rebootCountdownInterval) clearInterval(_rebootCountdownInterval);
+        _rebootCountdownInterval = setInterval(updateRebootCountdown, 1000);
+        updateRebootCountdown();
+    }
+    function startCountdown(totalSeconds, labels, storageKey) {
+        beginCountdown(Date.now() + totalSeconds * 1000, labels, storageKey);
+    }
+    function resumeCountdown(labels, storageKey) {
+        var deadline = readCountdownDeadline(storageKey);
+        if (!deadline) return;
+        if (deadline - Date.now() <= 0) { clearCountdownDeadline(storageKey); return; }
+        beginCountdown(deadline, labels, storageKey);
+    }
+    function startRebootCountdown(totalSeconds) {
+        startCountdown(totalSeconds || REBOOT_COUNTDOWN_SECONDS,
+            REBOOT_COUNTDOWN_LABELS, REBOOT_DEADLINE_KEY);
+    }
+    function resumeRebootCountdown() {
+        resumeCountdown(REBOOT_COUNTDOWN_LABELS, REBOOT_DEADLINE_KEY);
+    }
+    function startGuiReloadCountdown(totalSeconds) {
+        startCountdown(totalSeconds || GUI_RELOAD_COUNTDOWN_SECONDS,
+            RELOAD_COUNTDOWN_LABELS, GUI_RELOAD_DEADLINE_KEY);
+    }
+    function resumeGuiReloadCountdown() {
+        resumeCountdown(RELOAD_COUNTDOWN_LABELS, GUI_RELOAD_DEADLINE_KEY);
+    }
+    function initRebootButton() {
+        var rebootBtn = document.getElementById('system-reboot-btn');
+        if (!rebootBtn) return;
+        rebootBtn.addEventListener('click', function() {
+            if (!confirm(tr('Reboot the entire server in one minute? Active scans and connections will be interrupted.'))) return;
+            rebootBtn.disabled = true;
+            API.post('/system/reboot', {}).then(function() {
+                rebootBtn.disabled = false;
+                // The host reboots in one minute; show the regressive timer.
+                startRebootCountdown(REBOOT_COUNTDOWN_SECONDS);
+            }).catch(function(e) {
+                rebootBtn.disabled = false;
+                toast('Error: ' + e.message, 'error');
+            });
+        });
+    }
+    function initReloadGuiButton() {
+        var reloadBtn = document.getElementById('reload-gui-btn');
+        if (!reloadBtn) return;
+        reloadBtn.addEventListener('click', function() {
+            // Restart the maldet-gui backend service (fresh code/assets) after a
+            // short delay, then let the countdown reconnect the page.
+            if (!confirm(tr('Restart the WebGUI service in 10 seconds? The page will reconnect automatically.'))) return;
+            reloadBtn.disabled = true;
+            API.post('/system/reload', {}).then(function() {
+                reloadBtn.disabled = false;
+                startGuiReloadCountdown(GUI_RELOAD_COUNTDOWN_SECONDS);
+            }).catch(function(e) {
+                reloadBtn.disabled = false;
+                toast('Error: ' + e.message, 'error');
+            });
+        });
+    }
+
     // ----- Format Helpers -----
     function fmtTime(epoch) {
         if (!epoch || epoch === 0) return 'n/a';
@@ -299,6 +548,16 @@
             'Web server detection': 'Detecção de servidor web',
             'Web server detection is unavailable.': 'A detecção de servidor web está indisponível.',
             'No running web server detected.': 'Nenhum servidor web em execução foi detectado.',
+            'Email folder detection': 'Detecção de pastas de e-mail',
+            'Email folder detection is unavailable.': 'A detecção de pastas de e-mail está indisponível.',
+            'No running mail server detected.': 'Nenhum servidor de e-mail em execução foi detectado.',
+            'Detected mail server:': 'Servidor de e-mail detectado:',
+            'Email folders detected:': 'Pastas de e-mail detectadas:',
+            'No email folders found on this host.': 'Nenhuma pasta de e-mail encontrada neste host.',
+            'Monitor detected email folders (e.g. /var/mail, /var/vmail)':
+                'Monitorar pastas de e-mail detectadas (ex.: /var/mail, /var/vmail)',
+            'Email folder monitoring updated': 'Monitoramento de pastas de e-mail atualizado',
+            'maildirs': 'pastas de e-mail',
             'Detected web server:': 'Servidor web detectado:',
             'Document roots detected:': 'Document roots detectados:',
             'No document roots found in the server configuration.': 'Nenhum document root encontrado na configuração do servidor.',
@@ -309,6 +568,20 @@
             'Monitoring of detected document roots (e.g. public_html) enabled': 'Monitoramento dos document roots detectados (ex.: public_html) habilitado',
             'Monitoring of detected document roots (e.g. public_html) disabled': 'Monitoramento dos document roots detectados (ex.: public_html) desabilitado',
             'Web server monitoring updated': 'Monitoramento do servidor web atualizado',
+            'Monitored folders': 'Pastas monitoradas',
+            'Choose folder': 'Escolher pasta',
+            'Add folder': 'Adicionar pasta',
+            'Save folders': 'Salvar pastas',
+            'Remove': 'Remover',
+            'Folder path (e.g. /var/www/html)': 'Caminho da pasta (ex.: /var/www/html)',
+            'These folders are added to the monitored paths (monitor_paths.extra). Absolute paths must exist on the server. Changes take effect after Reload.':
+                'Estas pastas são adicionadas aos caminhos monitorados (monitor_paths.extra). Os caminhos absolutos precisam existir no servidor. As alterações entram em vigor após Recarregar.',
+            'No extra folders configured. Use the field above to add folders to real-time monitoring.':
+                'Nenhuma pasta extra configurada. Use o campo acima para adicionar pastas ao monitoramento em tempo real.',
+            'Enter a folder path to add.': 'Informe um caminho de pasta para adicionar.',
+            'Absolute path required (e.g. /var/www).': 'É necessário um caminho absoluto (ex.: /var/www).',
+            'Folder already in the list.': 'A pasta já está na lista.',
+            'Monitored folders saved': 'Pastas monitoradas salvas',
             'Quarantined Files': 'Arquivos em quarentena',
             'No files in quarantine.': 'Nenhum arquivo em quarentena.',
             'Details': 'Detalhes',
@@ -397,8 +670,20 @@
             'Installer directory': 'Diretório do instalador',
             'Effective UID': 'UID efetivo', 'Monitor PIDs': 'PIDs do monitor',
             'Reboot system': 'Reiniciar sistema', 'Reboot': 'Reiniciar',
+            'Reboot Server': 'Reiniciar servidor', 'Reload WebGUI': 'Recarregar WebGUI',
             'Reboot the entire server in one minute? Active scans and connections will be interrupted.':
                 'Reiniciar todo o servidor em um minuto? Scans ativos e conexões serão interrompidos.',
+            'System reboot scheduled': 'Reinicialização do sistema agendada',
+            'The server will restart in': 'O servidor será reiniciado em',
+            'Restarting now...': 'Reiniciando agora...',
+            'Active scans and connections will be interrupted.':
+                'Scans ativos e conexões serão interrompidos.',
+            'WebGUI restart scheduled': 'Reinicialização da WebGUI agendada',
+            'The WebGUI will restart in': 'A WebGUI será reiniciada em',
+            'The page reconnects automatically when the service is back.':
+                'A página será reconectada automaticamente quando o serviço voltar.',
+            'Restart the WebGUI service in 10 seconds? The page will reconnect automatically.':
+                'Reiniciar o serviço da WebGUI em 10 segundos? A página será reconectada automaticamente.',
             'No detections in this scan': 'Nenhuma detecção neste scan',
             'No quarantined files from this scan': 'Nenhum arquivo deste scan está em quarentena',
             'Restoring...': 'Restaurando...', 'Cleaning...': 'Limpando...',
@@ -638,23 +923,18 @@
                     self.navigate('config');
                 });
             }
-            var rebootBtn = document.getElementById('system-reboot-btn');
-            if (rebootBtn) {
-                rebootBtn.addEventListener('click', function() {
-                    if (!confirm(tr('Reboot the entire server in one minute? Active scans and connections will be interrupted.'))) return;
-                    rebootBtn.disabled = true;
-                    API.post('/system/reboot', {}).then(function(data) {
-                        rebootBtn.disabled = false;
-                        toast(data.message, 'warning', 12000);
-                    }).catch(function(e) {
-                        rebootBtn.disabled = false;
-                        toast('Error: ' + e.message, 'error');
-                    });
-                });
-            }
+            initRebootButton();
+            initReloadGuiButton();
             document.addEventListener('input', markPageDirty, true);
             document.addEventListener('change', markPageDirty, true);
             document.addEventListener('click', markPageDirty, true);
+            // Pressing Enter in the monitored-folder field adds it to the list.
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && e.target && e.target.id === 'monitor-path-input') {
+                    e.preventDefault();
+                    addMonitorPath();
+                }
+            });
             // Delegated click handler for all dynamically rendered buttons/tabs.
             // Uses data-action attributes (CSP-safe, no inline onclick needed).
             document.addEventListener('click', function(e) {
@@ -662,7 +942,7 @@
                 if (!el) return;
                 var action = el.getAttribute('data-action');
                 if (action === 'start-scan') startScan();
-                else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'));
+                else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'), el.getAttribute('data-title'));
                 else if (action === 'scan-details') openScanDetails(el.getAttribute('data-id'));
                 else if (action === 'scan-details-close') closeScanDetails();
                 else if (action === 'report-details') openReportDetails(el.getAttribute('data-id'));
@@ -687,6 +967,10 @@
                 else if (action === 'monitor-save-users') saveMonitorUsers();
                 else if (action === 'monitor-save-scope') saveMonitorScope();
                 else if (action === 'monitor-save-webserver') saveMonitorWebserver();
+                else if (action === 'monitor-save-mail') saveMonitorMail();
+                else if (action === 'monitor-add-path') addMonitorPath();
+                else if (action === 'monitor-remove-path') removeMonitorPath(el.getAttribute('data-path'));
+                else if (action === 'monitor-save-paths') saveMonitorPaths();
                 else if (action === 'update-ver') updateVer(false);
                 else if (action === 'update-ver-beta') updateVer(true);
                 else if (action === 'update-clamav') updateClamAv();
@@ -922,7 +1206,11 @@
             input.dispatchEvent(new Event('input', { bubbles: true }));
             if (_folderPickerTargetId === 'scan_path') updateScanSummary();
         }
+        var targetId = _folderPickerTargetId;
         closeFolderPicker();
+        // In the monitored-folders card the picker doubles as a shortcut for
+        // the "Add folder" button, so queue the chosen folder right away.
+        if (targetId === 'monitor-path-input') addMonitorPath();
     }
 
     function browseFolder(path) {
@@ -951,13 +1239,13 @@
         });
     }
 
-    function openFolderPicker(targetId) {
+    function openFolderPicker(targetId, title) {
         _folderPickerTargetId = targetId || 'scan_path';
         closeFolderPicker();
         var modal = document.createElement('div');
         modal.id = 'folder-picker-modal';
         modal.className = 'modal-backdrop';
-        modal.innerHTML = '<div class="modal"><div class="modal-header"><span class="modal-title">Choose scan folder</span>' +
+        modal.innerHTML = '<div class="modal"><div class="modal-header"><span class="modal-title">' + tr(title || 'Choose scan folder') + '</span>' +
             '<button class="modal-close" data-action="folder-close">×</button></div><div class="modal-body">' +
             '<div class="folder-current" id="folder-picker-path">Loading...</div><div id="folder-picker-body" class="folder-list"></div></div>' +
             '<div class="modal-footer"><button class="btn btn-ghost" data-action="folder-close">Cancel</button>' +
@@ -1713,7 +2001,7 @@
             if (!el) return;
             var action = el.getAttribute('data-action');
             if (action === 'schedule-modal-close') closeScheduleModal();
-            else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'));
+            else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'), el.getAttribute('data-title'));
             else if (action === 'schedule-save') saveScheduleForm(el.getAttribute('data-id') || null);
         });
         modal.addEventListener('change', function(e) {
@@ -1808,11 +2096,19 @@
             API.get('/system'), API.get('/monitor/users'),
             // Web server detection is best-effort; never block the page.
             API.get('/monitor/webserver').catch(function() { return {}; }),
+            // Mail folder detection is best-effort; never block the page.
+            API.get('/monitor/mail').catch(function() { return {}; }),
             API.get('/monitor/activity?lines=40').catch(function() { return {}; }),
-            API.get('/monitor/scope')
+            API.get('/monitor/scope'),
+            // Best-effort: an unreadable file must not break the page, and the
+            // card hides its controls so an empty list can never be saved.
+            API.get('/monitor/paths').catch(function(err) {
+                return { error: (err && err.message) || String(err) };
+            })
         ]).then(function(results) {
             var data = results[0], userData = results[1], ws = results[2] || {},
-                act = results[3] || {}, scope = results[4];
+                mail = results[3] || {}, act = results[4] || {},
+                scope = results[5], extra = results[6] || {};
             var sys = data.system;
             var h = '<div class="monitor-grid">';
             h += '<div class="card monitor-status-card"><div class="card-header"><span class="card-title">' + tr('Real-time monitoring (inotify)') + '</span><span class="monitor-badge">' + tr('Inotify') + '</span></div>';
@@ -1882,6 +2178,61 @@
                     (scope.scope === 'webroots' ? ' disabled' : '') + '>' + tr('Save') + '</button>';
             }
             h += '</div></div>';
+            // ---- Email folder detection card ----
+            h += '<div class="card monitor-mail-card"><div class="card-header"><span class="card-title">' + tr('Email folder detection') + '</span><span class="monitor-badge">' + tr('maildirs') + '</span></div>';
+            if (!mail || typeof mail.detected === 'undefined') {
+                h += '<p class="form-help">' + tr('Email folder detection is unavailable.') + '</p>';
+            } else if (!mail.detected) {
+                h += '<p>' + tr('No running mail server detected.') + '</p>';
+            } else {
+                h += '<div class="monitor-status-row"><span>' + tr('Detected mail server:') + '</span><strong>' + escapeHtml(mail.servers.join(', ')) + '</strong></div>';
+                h += '<p>' + tr('Email folders detected:') + '</p><ul class="webserver-docroot-list">';
+                if (!(mail.maildirs || []).length) {
+                    h += '<li class="form-help">' + tr('No email folders found on this host.') + '</li>';
+                } else {
+                    mail.maildirs.forEach(function(md) {
+                        h += '<li>' + escapeHtml(md) + '</li>';
+                    });
+                }
+                h += '</ul>';
+                h += '<label class="checkbox-row"><input type="checkbox" id="monitor-maildir-toggle"' +
+                    (mail.autodetect === '1' ? ' checked' : '') +
+                    (scope.scope === 'webroots' ? ' disabled' : '') + '> ' +
+                    tr('Monitor detected email folders (e.g. /var/mail, /var/vmail)') + '</label>';
+                if (scope.scope === 'webroots') {
+                    h += '<p class="form-help">' +
+                        tr('In webroot-only mode, additional document roots and temporary folders are not watched. Reload to apply changes.') +
+                        '</p>';
+                }
+                h += '<p class="form-help">' + tr('Changes take effect after Reload or restarting the monitor.') + '</p>';
+                h += '<button class="btn btn-primary" data-action="monitor-save-mail"' +
+                    (scope.scope === 'webroots' ? ' disabled' : '') + '>' + tr('Save') + '</button>';
+            }
+            h += '</div></div>';
+            // ---- Monitored folders card (extra paths added to the watch list) ----
+            h += '<div class="card monitor-paths-card"><div class="card-header"><span class="card-title">' + tr('Monitored folders') + '</span></div>';
+            if (extra.error) {
+                // Never render an empty list after a read failure: saving it
+                // would overwrite the existing entries with nothing.
+                h += '<div class="alert alert-warning"><strong>' + tr('Warning:') + '</strong> ' +
+                    escapeHtml(extra.error) + '</div>';
+            } else {
+                h += '<p class="form-help">' +
+                    tr('These folders are added to the monitored paths (monitor_paths.extra). Absolute paths must exist on the server. Changes take effect after Reload.') +
+                    '</p>';
+                if (scope.scope === 'webroots') {
+                    h += '<p class="form-help">' +
+                        tr('In webroot-only mode, additional document roots and temporary folders are not watched. Reload to apply changes.') +
+                        '</p>';
+                }
+                h += '<div class="monitor-path-add"><input type="text" class="form-input" id="monitor-path-input" placeholder="/var/www/html" aria-label="' +
+                    tr('Folder path (e.g. /var/www/html)') + '"><button type="button" class="btn btn-ghost" data-action="folder-picker" data-target="monitor-path-input" data-title="Choose folder">' +
+                    tr('Browse') + '</button><button class="btn btn-primary" data-action="monitor-add-path">' +
+                    tr('Add folder') + '</button></div>';
+                h += '<div class="monitor-path-list" id="monitor-path-list">' + renderMonitorPathList(extra.paths) + '</div>';
+                h += '<button class="btn btn-primary" data-action="monitor-save-paths">' + tr('Save folders') + '</button>';
+            }
+            h += '</div>';
             // ---- Monitor activity card (real-time scanned/changed files) ----
             h += '<div class="card monitor-activity-card"><div class="card-header"><span class="card-title">' + tr('Monitor activity') + '</span>' +
                 '<span class="monitor-badge">' + (act.running ? tr('Live') : tr('STOPPED')) + '</span></div>';
@@ -1915,6 +2266,50 @@
             rows += '<div class="monitor-activity-total form-help">' + escapeHtml(String(act.total_events)) + ' ' + tr('events logged') + '</div>';
         }
         return rows;
+    }
+
+    var _monitorExtraPaths = [];
+    function renderMonitorPathList(paths) {
+        if (paths) _monitorExtraPaths = paths.slice();
+        if (!_monitorExtraPaths.length) {
+            return '<p class="form-help">' +
+                tr('No extra folders configured. Use the field above to add folders to real-time monitoring.') + '</p>';
+        }
+        var rows = '';
+        _monitorExtraPaths.forEach(function(path) {
+            rows += '<div class="monitor-path-row"><code class="monitor-path-value">' + escapeHtml(path) + '</code>' +
+                '<button class="btn btn-danger btn-sm" data-action="monitor-remove-path" data-path="' +
+                escapeHtml(path) + '">' + tr('Remove') + '</button></div>';
+        });
+        return rows;
+    }
+    function addMonitorPath() {
+        var input = document.getElementById('monitor-path-input');
+        if (!input) return;
+        var value = (input.value || '').trim();
+        if (!value) { toast(tr('Enter a folder path to add.'), 'error'); return; }
+        if (value.charAt(0) !== '/') { toast(tr('Absolute path required (e.g. /var/www).'), 'error'); return; }
+        if (value.length > 1) value = value.replace(/\/+$/, '') || '/';
+        if (_monitorExtraPaths.indexOf(value) !== -1) {
+            toast(tr('Folder already in the list.'), 'info');
+            return;
+        }
+        _monitorExtraPaths.push(value);
+        input.value = '';
+        input.focus();
+        var list = document.getElementById('monitor-path-list');
+        if (list) list.innerHTML = renderMonitorPathList();
+    }
+    function removeMonitorPath(path) {
+        _monitorExtraPaths = _monitorExtraPaths.filter(function(item) { return item !== path; });
+        var list = document.getElementById('monitor-path-list');
+        if (list) list.innerHTML = renderMonitorPathList();
+    }
+    function saveMonitorPaths() {
+        API.put('/monitor/paths', { paths: _monitorExtraPaths }).then(function(data) {
+            toast((data && data.message) || tr('Monitored folders saved'), 'success');
+            Router.navigate('monitoring');
+        }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
     }
 
     var _monitorActivityTimer = null;
@@ -2013,6 +2408,13 @@
         if (!toggle || toggle.disabled) return;
         API.post('/monitor/webserver', { enabled: !!toggle.checked }).then(function(data) {
             toast((data && data.message) || 'Web server monitoring updated', 'success');
+        }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
+    }
+    function saveMonitorMail() {
+        var toggle = document.getElementById('monitor-maildir-toggle');
+        if (!toggle || toggle.disabled) return;
+        API.post('/monitor/mail', { enabled: !!toggle.checked }).then(function(data) {
+            toast((data && data.message) || tr('Email folder monitoring updated'), 'success');
         }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
     }
     function pollMonitorStarted() {
@@ -2700,6 +3102,10 @@
     // ----- Initialize -----
     document.addEventListener('DOMContentLoaded', function() {
         window.__maldet_booted = true;
+        // Resume an in-flight reboot or WebGUI-reload countdown after a page
+        // reload so the timer does not restart from the top.
+        resumeRebootCountdown();
+        resumeGuiReloadCountdown();
         API.get('/auth/status').then(function(status) {
             if (status.authenticated) {
                 Router.init();

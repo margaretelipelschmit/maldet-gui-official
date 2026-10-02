@@ -12,7 +12,7 @@ Built with Python 3 standard library only — no pip installs, no frameworks, no
 - **Quarantine** — View quarantined files, restore individual files, bulk operations
 - **Reports** — View all scan reports, JSON reports, hook scan activity, email reports
 - **Schedules** — GUI-managed entries in `/etc/cron.d/maldet-gui-schedules` missing from `gui.schedules.json` are recovered by ID and saved to the JSON list. Existing JSON entries take precedence; unrelated cron entries are preserved. Each schedule's View Reports lists only scans tagged when its cron job ran; older untagged scans and manual scans of the same path remain in Reports
-- **Monitoring** — Start/stop/reload inotify monitor, view monitor configuration
+- **Monitoring** — Start/stop/reload inotify monitor, view monitor configuration, and add extra folders to the watch list (`monitor_paths_extra`)
 - **Updates** — Update signatures, update maldet version (stable/beta channel)
 - **Configuration** — Full conf.maldet editor with sections, toggles, and text inputs
 - **Event Log** — View the maldet event log with color-coded entries
@@ -148,8 +148,11 @@ The GUI provides a JSON API at `/api/*`:
 | `/api/logs` | GET | Event log entries |
 | `/api/monitor` | POST | Start/stop/reload monitor |
 | `/api/monitor/webserver` | GET | Detect running web server + document roots (runs `maldet --webserver-detect`); returns `detected`, `servers`, `docroots` and `autodetect` state |
+| `/api/monitor/mail` | GET/POST | Detect running mail server + mail folders (runs `maldet --mail-detect`); GET returns `detected`, `servers`, `maildirs` and `autodetect` state; POST `{enabled}` toggles `inotify_maildir_autodetect` |
 | `/api/monitor/webserver` | POST | `{enabled: true|false}` — enable/disable monitoring of the detected document roots (`inotify_docroot_autodetect` in conf.maldet) |
 | `/api/monitor/activity` | GET | Tail the monitor's `inotify_log` in real time; returns `running`, `total_events` and `entries` (`{file, event, time}`, newest first) |
+| `/api/monitor/paths` | GET | List the extra folders watched alongside the primary mode (one absolute path per line in `monitor_paths_extra`); returns `paths` and `path` |
+| `/api/monitor/paths` | PUT | `{paths: [...]}` — replace the extra monitored folders; every entry must be an existing absolute directory (relative/missing paths are rejected, the list is deduplicated, normalized and sorted) |
 | `/api/update/sigs` | POST | Update signatures |
 | `/api/update/version` | POST | Update maldet version |
 | `/api/update/clamav` | POST | Update the ClamAV database with `freshclam` |

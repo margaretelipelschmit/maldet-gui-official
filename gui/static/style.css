@@ -201,6 +201,12 @@ body {
     align-items: center;
 }
 
+.top-bar-actions #system-reboot-btn { white-space: nowrap; }
+.top-bar-actions #system-reboot-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.top-bar-actions #reload-gui-btn { white-space: nowrap; }
+.top-bar-actions #reload-gui-btn:disabled { opacity: .55; cursor: not-allowed; }
+
 .top-bar-title {
     display: flex;
     align-items: center;
@@ -494,6 +500,83 @@ tr:hover td {
     font-size: 12px;
     color: var(--text-muted);
     text-align: center;
+}
+
+/* ===== System information ===== */
+
+.system-page { display: grid; gap: 20px; }
+.system-page .card { margin: 0; min-width: 0; }
+.system-hero {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    background: linear-gradient(110deg, var(--bg-card), var(--bg-secondary));
+    border-left: 3px solid var(--accent);
+}
+.system-eyebrow {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.system-hero h2 { font-size: clamp(20px, 3vw, 30px); overflow-wrap: anywhere; }
+.system-hero p { color: var(--text-secondary); overflow-wrap: anywhere; }
+.system-health { display: flex; flex-wrap: wrap; gap: 8px; }
+.system-health-item {
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.system-health-item.is-online { color: var(--success); border-color: var(--success); }
+.system-health-item.is-offline { color: var(--danger); border-color: var(--danger); }
+.system-section-title { font-size: 16px; margin-bottom: -8px; }
+.system-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.system-metric { display: grid; align-content: start; gap: 14px; }
+.system-metric-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.system-metric-heading span { color: var(--text-secondary); font-weight: 600; }
+.system-metric-heading strong { font-size: 25px; font-variant-numeric: tabular-nums; }
+.system-meter { height: 10px; border-radius: 10px; background: var(--bg-tertiary); overflow: hidden; }
+.system-meter-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width .5s ease;
+}
+.system-meter.warning .system-meter-fill { background: var(--warning); }
+.system-meter.danger .system-meter-fill { background: var(--danger); }
+.system-metric-detail { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.system-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.system-details { display: grid; gap: 0; }
+.system-detail { display: grid; grid-template-columns: minmax(110px, 35%) minmax(0, 1fr); gap: 12px; padding: 10px 0; }
+.system-detail + .system-detail { border-top: 1px solid var(--border); }
+.system-detail dt { color: var(--text-muted); font-size: 13px; }
+.system-detail dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.system-binaries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.system-binary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-width: 0;
+}
+.system-binary div { min-width: 0; }
+.system-binary strong, .system-binary span { display: block; }
+.system-binary div span { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.system-binary .badge { flex-shrink: 0; }
+@media (max-width: 900px) {
+    .system-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .system-panels { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+    .system-metrics, .system-binaries { grid-template-columns: 1fr; }
 }
 
 /* ===== Forms ===== */
@@ -1159,7 +1242,8 @@ tr:hover td {
 }
 
 .monitor-status-card,
-.monitor-users-card {
+.monitor-users-card,
+.monitor-paths-card {
     min-width: 0;
 }
 
@@ -1248,6 +1332,43 @@ tr:hover td {
     flex: 0 0 auto;
     color: var(--text-muted, #888);
     white-space: nowrap;
+}
+
+.monitor-path-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0 14px;
+}
+
+.monitor-path-add .form-input {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.monitor-path-list {
+    display: grid;
+    gap: 8px;
+    max-height: 260px;
+    margin: 0 0 14px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.monitor-path-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border, #eee);
+}
+
+.monitor-path-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    word-break: break-all;
 }
 
 .monitor-activity-total {
@@ -1477,6 +1598,61 @@ tr:hover td {
     display: flex;
     gap: 12px;
     justify-content: flex-end;
+}
+
+/* ===== Reboot Countdown ===== */
+
+.reboot-countdown-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.reboot-countdown-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 32px 40px;
+    text-align: center;
+    width: min(420px, 90vw);
+}
+
+.reboot-countdown-icon {
+    font-size: 36px;
+    line-height: 1;
+    color: var(--danger);
+    margin-bottom: 12px;
+}
+
+.reboot-countdown-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.reboot-countdown-text {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.reboot-countdown-timer {
+    font: 700 56px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--danger);
+    letter-spacing: 2px;
+    margin-bottom: 14px;
+}
+
+.reboot-countdown-hint {
+    font-size: 12px;
+    color: var(--text-muted);
 }
 
 /* ===== Tabs ===== */
@@ -1709,6 +1885,8 @@ tr:hover td {
     .top-bar-actions #settings-btn {
         display: none;
     }
+    .top-bar-actions #system-reboot-btn span { display: none; }
+    .top-bar-actions #reload-gui-btn span { display: none; }
 
     .grid-4 {
         grid-template-columns: 1fr;

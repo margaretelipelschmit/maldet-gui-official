@@ -231,6 +231,7 @@ usage: maldet [OPTION] [ARGUMENT]
     --test-alert TYPE CHANNEL   send test alert (scan|digest, email|telegram)
     --mkpubpaths                create per-user pub/ data directories
     --webserver-detect          detect running web server + document roots
+    --mail-detect               detect running mail server + mail folders
     --web-proxy IP:PORT         set HTTP/HTTPS proxy
     -v|--version                show version information
     -h|--help                   show detailed help
@@ -306,6 +307,16 @@ MONITORING:
        document roots to `maldet --monitor users` monitoring.
        Exits 0 when a web server is detected, 1 when none is found.
        e.g: maldet --webserver-detect
+
+    --mail-detect
+       Detect the running mail server (Postfix, Exim, Dovecot, Sendmail,
+       Courier, Cyrus) and print its mail data folder(s) (e.g. /var/mail,
+       /var/vmail, Maildir bases), plus the inotify_maildir_autodetect
+       state. Enable inotify_maildir_autodetect="1" in conf.maldet to add
+       the detected mail folders to `maldet --monitor users` monitoring.
+       Exits 0 when a mail server or mail folder is detected, 1 when none
+       is found.
+       e.g: maldet --mail-detect
 
 QUARANTINE & RESTORE:
     -q, --quarantine SCANID
@@ -598,6 +609,10 @@ else
 			--webserver-detect)
 				header
 				webserver_detect_report || exit $?
+			;;
+			--mail-detect)
+				header
+				mail_detect_report || exit $?
 			;;
 			--digest)
 				_lmd_alert_init

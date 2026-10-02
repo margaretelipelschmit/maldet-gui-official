@@ -41,6 +41,11 @@ LOG_DIR = "/var/log/maldet"
 EVENT_LOG = "event_log"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
+# The "Reload WebGUI" action restarts the maldet-gui service itself. Wait a few
+# seconds before restarting so the HTTP response and the on-screen countdown
+# reach the browser before the service drops.
+GUI_RELOAD_DELAY_SECONDS = 10
+GUI_SERVICE_NAME = "maldet-gui.service"
 
 MIME_TYPES = {
     ".html": "text/html", ".css": "text/css", ".js": "application/javascript",
@@ -1158,7 +1163,7 @@ class MaldetAPI:
         if route == "/api/system/usage" and method == "GET":
             return 200, get_resource_usage()
 
-        if "/api/system/reboot" in route:
+        if route == "/api/system/reboot":
             if method != "POST":
                 return 405, {"error": "Method not allowed"}
             if os.geteuid() != 0:
@@ -1177,6 +1182,34 @@ class MaldetAPI:
                         (result.stderr.strip() or result.stdout.strip() or
                          "shutdown exited with status %d" % result.returncode)}
             return 200, {"message": "System reboot scheduled in one minute"}
+
+        if route == "/api/system/reload":
+            if method != "POST":
+                return 405, {"error": "Method not allowed"}
+            if os.geteuid() != 0:
+                return 403, {"error": "Reload requires the WebGUI to run as root"}
+            systemctl = shutil.which("systemctl")
+            if not systemctl:
+                return 503, {"error": "systemctl command is not available"}
+            shell = shutil.which("sh") or "/bin/sh"
+            # Restart this same maldet-gui service after a short delay so the
+            # HTTP response and the UI countdown reach the browser before the
+            # service drops. The command runs detached in its own session so the
+            # SIGTERM that restarts this process (maldet-gui.service uses
+            # KillMode=process) does not interrupt it mid-restart.
+            command = "sleep %d; exec %s restart %s" % (
+                GUI_RELOAD_DELAY_SECONDS, shlex.quote(systemctl),
+                shlex.quote(GUI_SERVICE_NAME))
+            try:
+                subprocess.Popen(
+                    [shell, "-c", command],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError as exc:
+                return 503, {"error": "Could not schedule reload: " + str(exc)}
+            return 200, {"message": "WebGUI reload scheduled in %d seconds" %
+                         GUI_RELOAD_DELAY_SECONDS,
+                         "delay": GUI_RELOAD_DELAY_SECONDS}
 
         if route == "/api/version":
             info = get_system_info()
@@ -1314,8 +1347,14 @@ class MaldetAPI:
         if route == "/api/monitor/scope":
             return MaldetAPI._monitor_scope(method, body or {})
 
+        if route == "/api/monitor/paths":
+            return MaldetAPI._monitor_paths(method, body or {})
+
         if route == "/api/monitor/webserver":
             return MaldetAPI._monitor_webserver(method, body or {})
+
+        if route == "/api/monitor/mail":
+            return MaldetAPI._monitor_mail(method, body or {})
 
         if route == "/api/monitor/activity" and method == "GET":
             return MaldetAPI._monitor_activity(query)
@@ -2152,6 +2191,62 @@ class MaldetAPI:
                      "restart_required": True}
 
     @staticmethod
+    def _monitor_paths(method, data):
+        """List and persist extra folders watched alongside the primary mode.
+
+        Backed by the `monitor_paths_extra` file (one absolute directory per
+        line): the monitor supervisor appends every valid entry to the inotify
+        watch list (files/internals/lmd_monitor.sh, _monitor_append_extra_paths).
+        Entries are additive — they never replace the primary users/path mode.
+        """
+        config = parse_config()
+        setting = config.get("monitor_paths_extra", {})
+        extra_path = setting.get("value") if isinstance(setting, dict) else setting
+        extra_path = extra_path or os.path.join(get_base_dir(), "monitor_paths.extra")
+        paths = []
+        if os.path.isfile(extra_path):
+            try:
+                with open(extra_path, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        entry = line.strip()
+                        if entry and not entry.startswith("#"):
+                            paths.append(entry)
+            except OSError as exc:
+                return 500, {"error": "Cannot read monitored folders: " + str(exc)}
+        if method == "GET":
+            return 200, {"paths": paths, "path": extra_path}
+        if method != "PUT":
+            return 405, {"error": "Method not allowed"}
+        requested = data.get("paths")
+        if not isinstance(requested, list) or any(not isinstance(v, str) for v in requested):
+            return 400, {"error": "paths must be a list of folder paths"}
+        normalized = []
+        for raw in requested:
+            entry = raw.strip()
+            if not entry:
+                continue
+            if (not os.path.isabs(entry) or "\n" in entry or "\r" in entry
+                    or "\x00" in entry):
+                return 400, {"error": "Invalid folder path: " + entry}
+            entry = os.path.normpath(entry)
+            if not os.path.isdir(entry):
+                return 400, {"error": "Folder does not exist: " + entry}
+            if entry not in normalized:
+                normalized.append(entry)
+        normalized.sort()
+        try:
+            os.makedirs(os.path.dirname(extra_path) or ".", exist_ok=True)
+            tmp = extra_path + ".tmp.%d" % os.getpid()
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(normalized) + ("\n" if normalized else ""))
+            os.chmod(tmp, 0o640)
+            os.replace(tmp, extra_path)
+        except OSError as exc:
+            return 500, {"error": "Cannot save monitored folders: " + str(exc)}
+        return 200, {"message": "Monitored folders saved",
+                     "paths": normalized, "restart_required": True}
+
+    @staticmethod
     def _monitor_users(method, data):
         """List and persist per-user exclusions for `maldet -m users`."""
         config = parse_config()
@@ -2256,6 +2351,71 @@ class MaldetAPI:
             "detected": bool(servers),
             "servers": servers,
             "docroots": docroots,
+            "autodetect": autodetect,
+            "conf_path": conf_path,
+            "stdout": out or "",
+            "stderr": err or "",
+        }
+
+    @staticmethod
+    def _monitor_mail(method, data):
+        """Detect the running mail server and toggle monitoring of mail folders.
+
+        GET: runs `maldet --mail-detect` (the same detection the monitor's
+        inotify_maildir_autodetect feature uses) and reports the detected mail
+        server(s), their mail folders (e.g. /var/mail, /var/vmail) and whether
+        autodetect monitoring is currently enabled.
+        POST: {enabled: true|false} persists inotify_maildir_autodetect in
+        conf.maldet; takes effect when the monitor is (re)started/reloaded.
+        """
+        conf_path = get_conf_path()
+        if method == "POST":
+            enabled = data.get("enabled")
+            if not isinstance(enabled, bool):
+                return 400, {"error": "Missing or invalid 'enabled' boolean"}
+            value = "1" if enabled else "0"
+            ok, msg = write_config_change(conf_path, "inotify_maildir_autodetect", value)
+            if not ok:
+                return 400, {"error": msg}
+            return 200, {
+                "message": ("Monitoring of detected email folders " +
+                            ("enabled" if enabled else "disabled")),
+                "autodetect": value, "restart_required": True,
+            }
+        if method != "GET":
+            return 405, {"error": "Method not allowed"}
+        config = parse_config(conf_path)
+        autodetect = config.get("inotify_maildir_autodetect", {})
+        if isinstance(autodetect, dict):
+            autodetect = autodetect.get("value", "0")
+        autodetect = "1" if str(autodetect).strip() == "1" else "0"
+        servers, maildirs = [], []
+        in_maildirs = False
+        try:
+            out, err, rc = run_maldet(["--mail-detect"], timeout=60)
+        except Exception as exc:
+            return 503, {"error": "Failed to run mail folder detection: " + str(exc)}
+        for line in (out or "").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("mail server detected:"):
+                name = stripped.split(":", 1)[1].strip()
+                in_maildirs = False
+                if name and name != "none":
+                    servers.append(name)
+                continue
+            if stripped == "mail folders:":
+                in_maildirs = True
+                continue
+            if stripped.startswith("mail folders: none"):
+                in_maildirs = False
+                continue
+            if in_maildirs and stripped.startswith("/"):
+                if stripped not in maildirs:
+                    maildirs.append(stripped)
+        return 200, {
+            "detected": bool(servers),
+            "servers": servers,
+            "maildirs": maildirs,
             "autodetect": autodetect,
             "conf_path": conf_path,
             "stdout": out or "",
@@ -2425,6 +2585,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         route = urlparse(self.path).path
         body = self._read_body()
+        if route in ("/api/system/reboot", "/api/system/reload"):
+            if not self._authenticated():
+                return self._auth_response()
+            origin = self.headers.get("Origin")
+            parsed_origin = urlparse(origin or "")
+            if parsed_origin.scheme not in ("http", "https") or \
+                    parsed_origin.netloc != self.headers.get("Host") or \
+                    parsed_origin.path or parsed_origin.query or parsed_origin.fragment:
+                return self._send_json({"error": "Same-origin request required"}, 403)
+            if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json":
+                return self._send_json({"error": "JSON request required"}, 415)
+            status, data = MaldetAPI.handle("POST", route, body)
+            return self._send_json(data, status)
         if route == "/api/auth/setup":
             if auth_required():
                 return self._send_json({"error": "Password is already configured"}, 409)
