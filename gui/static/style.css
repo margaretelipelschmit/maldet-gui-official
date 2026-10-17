@@ -391,6 +391,19 @@ body {
     margin-right: 8px;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.export-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
 /* ===== Grid ===== */
 
 .grid {
@@ -1629,6 +1642,12 @@ tr:hover td {
     display: flex;
     gap: 12px;
     justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.modal-footer .export-group {
+    margin-right: auto;
 }
 
 /* ===== Reboot Countdown ===== */
