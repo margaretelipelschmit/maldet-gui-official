@@ -413,6 +413,129 @@
         return div.innerHTML;
     }
 
+    // ----- Export helpers (reports) -----
+    function triggerDownload(filename, content, mimeType) {
+        var blob = new Blob([content], { type: mimeType + ';charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    function csvCell(value) {
+        var s = value === null || value === undefined ? '' : String(value);
+        if (/["\n,;]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+        return s;
+    }
+
+    function reportsSummary(reports) {
+        var totalHits = 0, totalQuarantined = 0, totalFiles = 0;
+        reports.forEach(function(r) {
+            var hits = Number(r.total_hits);
+            if (!Number.isFinite(hits)) hits = Array.isArray(r.hits) ? r.hits.length : (r.summary && Number(r.summary.total_hits)) || 0;
+            totalHits += hits;
+            totalQuarantined += Number(r.total_quarantined) || 0;
+            totalFiles += Number(r.total_files) || 0;
+        });
+        return { count: reports.length, totalHits: totalHits, totalQuarantined: totalQuarantined, totalFiles: totalFiles };
+    }
+
+    function htmlDocument(title, bodyHtml) {
+        return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
+            '<title>' + escapeHtml(title) + '</title><style>' +
+            'body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#0f1115;color:#e6e6e6;margin:0;padding:24px;}' +
+            'h1{font-size:20px;margin:0 0 4px;} .meta{color:#9aa0a6;font-size:13px;margin-bottom:20px;}' +
+            '.summary{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:24px;}' +
+            '.summary div{background:#1b1e26;border:1px solid #2a2e38;border-radius:8px;padding:12px 18px;min-width:120px;}' +
+            '.summary strong{display:block;font-size:22px;}' +
+            '.summary span{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#9aa0a6;}' +
+            'table{width:100%;border-collapse:collapse;font-size:13px;}' +
+            'th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #2a2e38;}' +
+            'th{background:#1b1e26;text-transform:uppercase;font-size:11px;letter-spacing:.5px;color:#9aa0a6;}' +
+            'code{font-family:ui-monospace,Menlo,Consolas,monospace;}' +
+            '@media print{body{background:#fff;color:#111;} .summary div{background:#f3f3f3;border-color:#ddd;} th{background:#f3f3f3;color:#555;} th,td{border-color:#ddd;}}' +
+            '</style></head><body>' + bodyHtml + '</body></html>';
+    }
+
+    function exportReportsList(format, reports) {
+        if (!reports || !reports.length) { toast(tr('No completed reports found.'), 'error'); return; }
+        var stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        if (format === 'json') {
+            triggerDownload('maldet-reports-' + stamp + '.json', JSON.stringify(reports, null, 2), 'application/json');
+        } else if (format === 'csv') {
+            var header = ['Scan ID', 'Path', 'Started', 'Completed', 'Duration (s)', 'Files', 'Hits', 'Quarantined'];
+            var lines = [header.map(csvCell).join(',')];
+            reports.forEach(function(r) {
+                var hits = Number(r.total_hits);
+                if (!Number.isFinite(hits)) hits = Array.isArray(r.hits) ? r.hits.length : (r.summary && Number(r.summary.total_hits)) || 0;
+                lines.push([r.scan_id || '', r.path || '', r.started_epoch || '', r.completed || r.completed_epoch || '',
+                    r.elapsed_seconds || '', Number(r.total_files) || 0, hits, Number(r.total_quarantined) || 0].map(csvCell).join(','));
+            });
+            triggerDownload('maldet-reports-' + stamp + '.csv', lines.join('\r\n'), 'text/csv');
+        } else {
+            var sum = reportsSummary(reports);
+            var body = '<h1>' + tr('Scan Reports') + '</h1><div class="meta">' + escapeHtml(new Date().toLocaleString()) + '</div>';
+            body += '<div class="summary">' +
+                '<div><strong>' + sum.count + '</strong><span>' + tr('Scan Reports') + '</span></div>' +
+                '<div><strong>' + sum.totalHits + '</strong><span>' + tr('Hits') + '</span></div>' +
+                '<div><strong>' + sum.totalQuarantined + '</strong><span>' + tr('Quarantined') + '</span></div>' +
+                '<div><strong>' + sum.totalFiles + '</strong><span>' + tr('Files') + '</span></div></div>';
+            body += '<table><thead><tr><th>' + tr('Scan ID') + '</th><th>' + tr('Path') + '</th><th>' + tr('Started') +
+                '</th><th>' + tr('Completed') + '</th><th>' + tr('Duration') + '</th><th>' + tr('Files') + '</th><th>' +
+                tr('Hits') + '</th><th>' + tr('Quarantined') + '</th></tr></thead><tbody>';
+            reports.forEach(function(r) {
+                var hits = Number(r.total_hits);
+                if (!Number.isFinite(hits)) hits = Array.isArray(r.hits) ? r.hits.length : (r.summary && Number(r.summary.total_hits)) || 0;
+                body += '<tr><td><code>' + escapeHtml(r.scan_id || '-') + '</code></td><td>' + escapeHtml(r.path || '-') +
+                    '</td><td>' + fmtTime(r.started_epoch) + '</td><td>' +
+                    escapeHtml(r.completed || (r.completed_epoch ? fmtTime(r.completed_epoch) : '-')) + '</td><td>' +
+                    fmtDuration(r.elapsed_seconds) + '</td><td>' + (Number(r.total_files) || 0) + '</td><td>' + hits +
+                    '</td><td>' + (Number(r.total_quarantined) || 0) + '</td></tr>';
+            });
+            body += '</tbody></table>';
+            triggerDownload('maldet-reports-' + stamp + '.html', htmlDocument(tr('Scan Reports'), body), 'text/html');
+        }
+        toast(tr('Report exported'), 'success');
+    }
+
+    function exportSingleReport(format, scanId, data) {
+        if (!data) { toast(tr('Error exporting report'), 'error'); return; }
+        var report = data.reports && data.reports[0] ? data.reports[0] : data;
+        var hits = report.hits || report.detections || [];
+        var stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        if (format === 'json') {
+            triggerDownload('maldet-report-' + scanId + '-' + stamp + '.json', JSON.stringify(data, null, 2), 'application/json');
+        } else if (format === 'csv') {
+            var lines = [['File', 'Signature', 'Hash'].map(csvCell).join(',')];
+            hits.forEach(function(hit) {
+                lines.push([hit.file || hit.path || hit.filename || '', hit.signature || hit.sig || hit.name || '',
+                    hit.md5 || hit.hash || ''].map(csvCell).join(','));
+            });
+            triggerDownload('maldet-report-' + scanId + '-' + stamp + '.csv', lines.join('\r\n'), 'text/csv');
+        } else {
+            var totalHits = Number(report.total_hits);
+            if (!Number.isFinite(totalHits)) totalHits = hits.length;
+            var body = '<h1>' + tr('Scan report') + ' ' + escapeHtml(scanId) + '</h1><div class="meta">' +
+                escapeHtml(report.path || '') + (report.completed ? ' · ' + escapeHtml(report.completed) : '') + '</div>';
+            body += '<div class="summary"><div><strong>' + totalHits + '</strong><span>' + tr('Hits') + '</span></div></div>';
+            if (hits.length) {
+                body += '<table><thead><tr><th>File</th><th>Signature</th><th>Hash</th></tr></thead><tbody>';
+                hits.forEach(function(hit) {
+                    body += '<tr><td>' + escapeHtml(hit.file || hit.path || hit.filename || '-') + '</td><td>' +
+                        escapeHtml(hit.signature || hit.sig || hit.name || '-') + '</td><td><code>' +
+                        escapeHtml(hit.md5 || hit.hash || '-') + '</code></td></tr>';
+                });
+                body += '</tbody></table>';
+            }
+            triggerDownload('maldet-report-' + scanId + '-' + stamp + '.html', htmlDocument(tr('Scan report') + ' ' + scanId, body), 'text/html');
+        }
+        toast(tr('Report exported'), 'success');
+    }
+
     // ----- UI language -----
     var I18N = {
         lang: localStorage.getItem('maldet.gui.language') || 'en',
@@ -653,6 +776,11 @@
             'Completed': 'Concluído', 'Duration': 'Duração', 'Files': 'Arquivos',
             'Hits': 'Detecções', 'Quarantined': 'Em quarentena', 'Actions': 'Ações',
             'No completed reports found.': 'Nenhum relatório concluído encontrado.',
+            'Export': 'Exportar', 'Export HTML': 'Exportar HTML', 'Export CSV': 'Exportar CSV',
+            'Export JSON': 'Exportar JSON', 'Report exported': 'Relatório exportado com sucesso',
+            'Error exporting report': 'Erro ao exportar o relatório',
+            'Total Scans': 'Total de verificações', 'Total Files Scanned': 'Total de arquivos verificados',
+            'Active and stopped scans': 'Verificações ativas e paradas',
             'scan(s) still active.': 'scan(s) ainda ativo(s).',
             'scan(s) stopped and resumable.': 'scan(s) parado(s) e retomável(is).',
             'Stopped': 'Parado', 'Resume': 'Retomar', 'Discard': 'Descartar',
@@ -1122,6 +1250,9 @@
                 else if (action === 'schedule-toggle') scheduleAction(el.getAttribute('data-id'), 'toggle');
                 else if (action === 'schedule-delete') scheduleAction(el.getAttribute('data-id'), 'delete');
                 else if (action === 'schedule-reports') openScheduleReports(el.getAttribute('data-id'));
+                else if (action === 'reports-export') exportReportsList(el.getAttribute('data-format'), lastReportsData);
+                else if (action === 'report-export') exportSingleReport(el.getAttribute('data-format'),
+                    currentReportDetails.id, currentReportDetails.data);
             });
             document.getElementById('content').addEventListener('change', function(e) {
                 if (e.target && e.target.id === 'scan_type') updateScanTypeFields(e.target.value);
@@ -1938,18 +2069,29 @@
         });
     }
 
+    var lastReportsData = [];
+    var currentReportDetails = { id: null, data: null };
+
     function openReportDetails(scanId) {
         var old = document.getElementById('report-details-modal');
         if (old) old.remove();
+        currentReportDetails = { id: scanId, data: null };
         var modal = document.createElement('div');
         modal.id = 'report-details-modal';
         modal.className = 'modal-backdrop';
-        modal.innerHTML = '<div class="modal report-details-modal"><div class="modal-header"><span class="modal-title">Scan report</span>' +
+        modal.innerHTML = '<div class="modal report-details-modal"><div class="modal-header"><span class="modal-title">' + tr('Scan report') + '</span>' +
             '<button class="modal-close" data-action="report-details-close">×</button></div>' +
             '<div class="modal-body"><div class="loading">Loading report ' + escapeHtml(scanId) + '...</div></div>' +
-            '<div class="modal-footer"><button class="btn btn-ghost" data-action="report-details-close">Close</button></div></div>';
+            '<div class="modal-footer">' +
+            '<div class="export-group">' +
+            '<button class="btn btn-ghost btn-sm" data-action="report-export" data-format="html" data-id="' + escapeHtml(scanId) + '">' + tr('Export HTML') + '</button>' +
+            '<button class="btn btn-ghost btn-sm" data-action="report-export" data-format="csv" data-id="' + escapeHtml(scanId) + '">' + tr('Export CSV') + '</button>' +
+            '<button class="btn btn-ghost btn-sm" data-action="report-export" data-format="json" data-id="' + escapeHtml(scanId) + '">' + tr('Export JSON') + '</button>' +
+            '</div>' +
+            '<button class="btn btn-ghost" data-action="report-details-close">' + tr('Close') + '</button></div></div>';
         document.body.appendChild(modal);
         API.get('/scan/' + encodeURIComponent(scanId)).then(function(data) {
+            currentReportDetails = { id: scanId, data: data };
             var body = modal.querySelector('.modal-body');
             if (!body) return;
             var report = data.reports && data.reports[0] ? data.reports[0] : data;
@@ -1989,30 +2131,55 @@
     function renderReports() {
         return API.get('/scans').then(function(data) {
             var reports = data.reports || [];
+            lastReportsData = reports;
             var active = data.active || data.active_scans || [];
             var stopped = data.stopped || data.stopped_scans || [];
-            var h = '<div class="card"><div class="card-header"><span class="card-title">' +
-                tr('Scan Reports') + ' (' + reports.length + ')</span><button class="btn btn-ghost btn-sm" data-action="refresh">🔄</button></div>';
-            if (active.length) {
-                h += '<div class="alert alert-warning">' + escapeHtml(active.length + ' ' + tr('scan(s) still active.')) + '</div>';
-            }
-            if (stopped.length) {
-                h += '<div class="alert alert-warning">' + escapeHtml(stopped.length + ' ' + tr('scan(s) stopped and resumable.')) + '</div>';
-                h += '<div class="table-scroll"><table><thead><tr><th>' + tr('Scan ID') + '</th><th>' +
-                    tr('Path') + '</th><th>' + tr('Started') + '</th><th>' + tr('Stopped') + '</th><th>' +
-                    tr('Files') + '</th><th>' + tr('Hits') + '</th><th>' + tr('Actions') + '</th></tr></thead><tbody>';
-                for (var si = 0; si < stopped.length; si++) {
-                    var st = stopped[si];
-                    var stScanId = String(st.scan_id || '');
-                    h += '<tr><td><code>' + escapeHtml(stScanId || '-') + '</code></td>';
-                    h += '<td style="font-size:12px;">' + escapeHtml(st.path || '-') + '</td><td>' + fmtTime(st.started_epoch) + '</td>';
-                    h += '<td>' + escapeHtml(st.stopped || (st.stopped_epoch ? fmtTime(st.stopped_epoch) : '-')) + '</td>';
-                    h += '<td>' + (Number(st.total_files) || 0) + '</td><td>' + (Number(st.total_hits) || 0) + '</td>';
-                    h += '<td><button class="btn btn-primary btn-sm" data-action="scan-continue" data-id="' + escapeHtml(stScanId) + '">' + tr('Resume') + '</button> ';
-                    h += '<button class="btn btn-danger btn-sm" data-action="scan-kill" data-id="' + escapeHtml(stScanId) + '">' + tr('Discard') + '</button></td></tr>';
+            var sum = reportsSummary(reports);
+            var h = '';
+
+            // ---- Summary overview ----
+            h += '<div class="grid grid-4" style="margin-bottom:20px;">';
+            h += '<div class="stat"><div class="stat-value">' + sum.count + '</div><div class="stat-label">' + tr('Total Scans') + '</div></div>';
+            h += '<div class="stat ' + (sum.totalHits > 0 ? 'danger' : 'success') + '"><div class="stat-value">' + sum.totalHits + '</div><div class="stat-label">' + tr('Hits') + '</div></div>';
+            h += '<div class="stat warning"><div class="stat-value">' + sum.totalQuarantined + '</div><div class="stat-label">' + tr('Quarantined') + '</div></div>';
+            h += '<div class="stat"><div class="stat-value">' + sum.totalFiles + '</div><div class="stat-label">' + tr('Total Files Scanned') + '</div></div>';
+            h += '</div>';
+
+            // ---- Active / stopped scans ----
+            if (active.length || stopped.length) {
+                h += '<div class="card" style="margin-bottom:20px;"><div class="card-header"><span class="card-title">' +
+                    tr('Active and stopped scans') + '</span></div>';
+                if (active.length) {
+                    h += '<div class="alert alert-warning">' + escapeHtml(active.length + ' ' + tr('scan(s) still active.')) + '</div>';
                 }
-                h += '</tbody></table></div>';
+                if (stopped.length) {
+                    h += '<div class="alert alert-warning">' + escapeHtml(stopped.length + ' ' + tr('scan(s) stopped and resumable.')) + '</div>';
+                    h += '<div class="table-scroll"><table><thead><tr><th>' + tr('Scan ID') + '</th><th>' +
+                        tr('Path') + '</th><th>' + tr('Started') + '</th><th>' + tr('Stopped') + '</th><th>' +
+                        tr('Files') + '</th><th>' + tr('Hits') + '</th><th>' + tr('Actions') + '</th></tr></thead><tbody>';
+                    for (var si = 0; si < stopped.length; si++) {
+                        var st = stopped[si];
+                        var stScanId = String(st.scan_id || '');
+                        h += '<tr><td><code>' + escapeHtml(stScanId || '-') + '</code></td>';
+                        h += '<td style="font-size:12px;">' + escapeHtml(st.path || '-') + '</td><td>' + fmtTime(st.started_epoch) + '</td>';
+                        h += '<td>' + escapeHtml(st.stopped || (st.stopped_epoch ? fmtTime(st.stopped_epoch) : '-')) + '</td>';
+                        h += '<td>' + (Number(st.total_files) || 0) + '</td><td>' + (Number(st.total_hits) || 0) + '</td>';
+                        h += '<td><button class="btn btn-primary btn-sm" data-action="scan-continue" data-id="' + escapeHtml(stScanId) + '">' + tr('Resume') + '</button> ';
+                        h += '<button class="btn btn-danger btn-sm" data-action="scan-kill" data-id="' + escapeHtml(stScanId) + '">' + tr('Discard') + '</button></td></tr>';
+                    }
+                    h += '</tbody></table></div>';
+                }
+                h += '</div>';
             }
+
+            // ---- Completed reports ----
+            h += '<div class="card"><div class="card-header"><span class="card-title">' +
+                tr('Scan Reports') + ' (' + reports.length + ')</span><div class="header-actions">' +
+                '<div class="export-group">' +
+                '<button class="btn btn-ghost btn-sm" data-action="reports-export" data-format="html">' + tr('Export HTML') + '</button>' +
+                '<button class="btn btn-ghost btn-sm" data-action="reports-export" data-format="csv">' + tr('Export CSV') + '</button>' +
+                '<button class="btn btn-ghost btn-sm" data-action="reports-export" data-format="json">' + tr('Export JSON') + '</button>' +
+                '</div><button class="btn btn-ghost btn-sm" data-action="refresh">🔄</button></div></div>';
             if (reports.length === 0) {
                 h += '<p style="padding:12px;color:var(--text-muted);">' + tr('No completed reports found.') + '</p>';
             } else {
@@ -2332,16 +2499,25 @@
         if (modal) modal.remove();
     }
 
+    var currentScheduleReports = [];
+
     function openScheduleReports(id) {
         var old = document.getElementById('schedule-reports-modal');
         if (old) old.remove();
+        currentScheduleReports = [];
         var modal = document.createElement('div');
         modal.id = 'schedule-reports-modal';
         modal.className = 'modal-backdrop';
         modal.innerHTML = '<div class="modal report-details-modal"><div class="modal-header"><span class="modal-title">' +
             tr('Reports for') + '</span><button class="modal-close" data-action="schedule-reports-close">×</button></div>' +
             '<div class="modal-body"><div class="loading">' + tr('Loading...') + '</div></div>' +
-            '<div class="modal-footer"><button class="btn btn-ghost" data-action="schedule-reports-close">' + tr('Close') + '</button></div></div>';
+            '<div class="modal-footer">' +
+            '<div class="export-group">' +
+            '<button class="btn btn-ghost btn-sm" data-action="schedule-reports-export" data-format="html">' + tr('Export HTML') + '</button>' +
+            '<button class="btn btn-ghost btn-sm" data-action="schedule-reports-export" data-format="csv">' + tr('Export CSV') + '</button>' +
+            '<button class="btn btn-ghost btn-sm" data-action="schedule-reports-export" data-format="json">' + tr('Export JSON') + '</button>' +
+            '</div>' +
+            '<button class="btn btn-ghost" data-action="schedule-reports-close">' + tr('Close') + '</button></div></div>';
         document.body.appendChild(modal);
         modal.addEventListener('click', function(e) {
             var el = e.target.closest('[data-action]');
@@ -2349,6 +2525,7 @@
             var action = el.getAttribute('data-action');
             if (action === 'schedule-reports-close') closeScheduleReports();
             else if (action === 'report-details') openReportDetails(el.getAttribute('data-id'));
+            else if (action === 'schedule-reports-export') exportReportsList(el.getAttribute('data-format'), currentScheduleReports);
         });
         API.get('/schedules/' + encodeURIComponent(id) + '/reports').then(function(data) {
             var body = modal.querySelector('.modal-body');
@@ -2356,6 +2533,7 @@
             var title = modal.querySelector('.modal-title');
             if (title) title.textContent = tr('Reports for') + ' ' + (data.schedule ? data.schedule.name : id);
             var reports = data.reports || [];
+            currentScheduleReports = reports;
             if (!reports.length) {
                 body.innerHTML = '<p style="color:var(--text-muted);">' + tr('No reports found yet for this schedule.') + '</p>';
                 return;
