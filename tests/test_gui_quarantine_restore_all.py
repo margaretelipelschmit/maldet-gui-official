@@ -31,19 +31,23 @@ class RestoreAllQuarantineTest(unittest.TestCase):
                 patch.object(gui, "run_maldet", side_effect=restore) as run:
             status, body = gui.MaldetAPI._handle_quarantine_action(
                 "restore-all", {})
+            self.assertEqual(status, 202)
+            self.assertTrue(body["running"])
+            gui.RESTORE_ALL_THREAD.join(5)
+            body = gui.restore_all_status()
+            self.assertEqual(
+                [call.args[0] for call in run.call_args_list],
+                [["-s", "restored.1"], ["-s", "failed.2"], ["-s", "restored.3"]])
+            self.assertTrue(all(call.kwargs["timeout"] == 30
+                                for call in run.call_args_list))
+            self.assertEqual(details.call_count, 3)
 
-        self.assertEqual(status, 207)
+        self.assertFalse(body["running"])
         self.assertEqual(body["restored"], 2)
         self.assertEqual(body["failed"], 2)
         self.assertEqual(
             [item["file"] for item in body["results"]],
             ["restored.1", "failed.2", "../invalid", "restored.3"])
-        self.assertEqual(
-            [call.args[0] for call in run.call_args_list],
-            [["-s", "restored.1"], ["-s", "failed.2"], ["-s", "restored.3"]])
-        self.assertTrue(all(call.kwargs["timeout"] == 30
-                            for call in run.call_args_list))
-        self.assertEqual(details.call_count, 3)
 
     def test_empty_quarantine_returns_successful_zero_count(self):
         with patch.object(gui, "parse_quarantine_list", return_value=[]), \
@@ -52,7 +56,10 @@ class RestoreAllQuarantineTest(unittest.TestCase):
                 "restore-all", {})
 
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"restored": 0, "failed": 0, "results": []})
+        self.assertEqual(body["running"], False)
+        self.assertEqual(body["restored"], 0)
+        self.assertEqual(body["failed"], 0)
+        self.assertEqual(body["results"], [])
         run.assert_not_called()
 
     def test_single_restore_endpoint_used_by_gui_validates_and_returns_status(self):

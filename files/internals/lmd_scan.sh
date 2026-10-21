@@ -184,7 +184,7 @@ _run_yara_scan() {
 		local yara_filelist _yara_file_count
 		yara_filelist=$(_yara_filter_filelist "$1")
 		_yara_file_count=$($wc -l < "$yara_filelist")
-		_scan_progress "yara" "$_yara_file_count files"
+		_scan_progress_stage_start "yara" "$_yara_file_count"
 		_start_elapsed_timer "yara" "$_yara_file_count"
 		scan_stage_yara "$yara_filelist" "" "$scanid"
 		_stop_elapsed_timer
@@ -260,6 +260,17 @@ _bg_backoff_interval() {
 
 _meta_progress_interval=10  # seconds between meta progress updates
 _meta_progress_last=0
+
+_scan_progress_stage_start() {
+	# Publish 0/N before workers run. A bare "N files" line is read as N files
+	# already verified, and a previous stage's progress_pos would otherwise
+	# stay visible until the new stage's first checkpoint.
+	local _stage="$1" _file_count="${2:-0}"
+	[[ "$_file_count" =~ ^[0-9]+$ ]] || _file_count=0
+	_meta_progress_last=0
+	_scan_progress "$_stage" "0/${_file_count} files" "0" "0" "$_file_count"
+	_scan_progress_meta "$_stage" "0" "$_file_count" "0"
+}
 
 _scan_progress_meta() {
 	# Update scan.meta with current progress for -L/--list-active ETA display.
@@ -358,7 +369,8 @@ _wait_workers_with_progress() {
 			_scan_progress_log "$_stage" "$_processed" "$_file_count" "$_elapsed"
 			_scan_progress_meta "$_stage" "$_processed" "$_file_count" "$_elapsed"
 		else
-			_scan_progress "$_stage" "$_file_count files" "$_elapsed"
+			_scan_progress "$_stage" "0/${_file_count} files" "$_elapsed" "0" "$_file_count"
+			_scan_progress_meta "$_stage" "0" "$_file_count" "$_elapsed"
 		fi
 		if [ "$_running" -eq 0 ]; then
 			break
@@ -428,7 +440,7 @@ _start_elapsed_timer() {
 				_paused_accum=$((_paused_accum + 2))
 				continue
 			fi
-			_scan_progress "$_stage" "$_file_count files" "$(( SECONDS - _start_ts - _paused_accum ))"
+			_scan_progress "$_stage" "0/${_file_count} files" "$(( SECONDS - _start_ts - _paused_accum ))" "0" "$_file_count"
 		done &
 		_timer_pid=$!
 	fi
@@ -452,7 +464,7 @@ _scan_run_clamav() {
 	if [ -z "$hscan" ]; then
 		eout "{scan} scan of $hrspath ($tot_files files) in progress..." 1
 	fi
-	_scan_progress "clamav" "$tot_files files"
+	_scan_progress_stage_start "clamav" "$tot_files"
 	_start_elapsed_timer "clamav" "$tot_files"
 
 	echo "$(date +"%b %d %Y %H:%M:%S") $(hostname -s) clamscan start"  >> "$clamscan_log"
@@ -577,7 +589,7 @@ _scan_run_native() {
 		_md5_file_count=$($wc -l < "$_md5_batch_flist")
 		if [ "$_md5_file_count" -gt 0 ] && [ -s "$runtime_md5" ]; then
 			_nworkers=$(_resolve_worker_count "$_md5_file_count")
-			_scan_progress "md5" "$_md5_file_count files"
+			_scan_progress_stage_start "md5" "$_md5_file_count"
 			if [ "$_nworkers" -le 1 ]; then
 				local _md5_progress_dir _md5_pfile _md5_worker_pid
 				_md5_progress_dir=$(mktemp -d "$tmpdir/.md5_progress.$_scan_ns_pid.XXXXXX")
@@ -671,7 +683,7 @@ _scan_run_native() {
 		_sha256_file_count=$($wc -l < "$_sha256_batch_flist")
 		if [ "$_sha256_file_count" -gt 0 ]; then
 			_nworkers=$(_resolve_worker_count "$_sha256_file_count")
-			_scan_progress "sha256" "$_sha256_file_count files"
+			_scan_progress_stage_start "sha256" "$_sha256_file_count"
 			if [ "$_nworkers" -le 1 ]; then
 				local _sha256_progress_dir _sha256_pfile _sha256_worker_pid
 				_sha256_progress_dir=$(mktemp -d "$tmpdir/.sha256_progress.$_scan_ns_pid.XXXXXX")
@@ -796,7 +808,7 @@ _scan_run_native() {
 		fi
 		# Resolve worker count
 		_nworkers=$(_resolve_worker_count "$_hex_file_count")
-		_scan_progress "$_hex_stage_label" "$_hex_file_count files"
+		_scan_progress_stage_start "$_hex_stage_label" "$_hex_file_count"
 		# Split file list into chunks via awk round-robin
 		local _chunk_prefix _w
 		_chunk_prefix="$tmpdir/.hex_chunk.$_scan_ns_pid"
@@ -861,7 +873,7 @@ _scan_run_native() {
 	if [ "$string_length_scan" == "1" ] && [ -s "$_hex_filelist" ]; then
 		local _strlen_count
 		_strlen_count=$($wc -l < "$_hex_filelist")
-		_scan_progress "strlen" "$_strlen_count files"
+		_scan_progress_stage_start "strlen" "$_strlen_count"
 		while IFS= read -r rpath; do
 			if [ -f "$rpath" ]; then
 				scan_strlen file "$rpath" >> /dev/null 2>&1

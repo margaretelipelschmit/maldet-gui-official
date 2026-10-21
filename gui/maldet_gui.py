@@ -70,6 +70,16 @@ SCAN_START_RESERVATION_TTL = 30.0
 # a percentage on its own). Guarded by CPU_USAGE_LOCK since the HTTP server
 # is threaded and the dashboard may poll from multiple requests.
 CPU_USAGE_LOCK = threading.Lock()
+RESTORE_ALL_LOCK = threading.Lock()
+RESTORE_ALL_THREAD = None
+RESTORE_ALL_JOB = {
+    "running": False,
+    "total": 0,
+    "restored": 0,
+    "failed": 0,
+    "current": "",
+    "results": [],
+}
 _LAST_CPU_TIMES = None
 
 
@@ -1137,6 +1147,79 @@ def safe_json_active():
 # API Handler
 # ---------------------------------------------------------------------------
 
+def restore_all_status():
+    """Snapshot of the background restore-all job."""
+    with RESTORE_ALL_LOCK:
+        status = dict(RESTORE_ALL_JOB)
+        status["results"] = list(RESTORE_ALL_JOB.get("results") or [])
+    return status
+
+
+def _restore_one_quarantined(filename):
+    if not filename or os.path.basename(filename) != filename:
+        return {"file": filename, "ok": False, "error": "Invalid quarantine filename"}
+    try:
+        quarantine_details(filename)
+    except (FileNotFoundError, ValueError):
+        return {"file": filename, "ok": False, "error": "Quarantined file not found"}
+    out, err, rc = run_maldet(["-s", filename], timeout=30)
+    return {
+        "file": filename,
+        "ok": rc in (0, 2),
+        "returncode": rc,
+        "stdout": out,
+        "stderr": err,
+    }
+
+
+def _restore_all_worker(files):
+    global RESTORE_ALL_JOB
+    for item in files:
+        filename = item.get("name", "") if isinstance(item, dict) else ""
+        with RESTORE_ALL_LOCK:
+            RESTORE_ALL_JOB["current"] = filename
+        result = _restore_one_quarantined(filename)
+        with RESTORE_ALL_LOCK:
+            RESTORE_ALL_JOB["results"].append(result)
+            if result.get("ok"):
+                RESTORE_ALL_JOB["restored"] += 1
+            else:
+                RESTORE_ALL_JOB["failed"] += 1
+            RESTORE_ALL_JOB["current"] = ""
+    with RESTORE_ALL_LOCK:
+        RESTORE_ALL_JOB["running"] = False
+
+
+def start_restore_all():
+    """Start maldet restore for every quarantined file without blocking the request."""
+    global RESTORE_ALL_JOB, RESTORE_ALL_THREAD
+    files = parse_quarantine_list()
+    with RESTORE_ALL_LOCK:
+        if RESTORE_ALL_JOB.get("running"):
+            status = dict(RESTORE_ALL_JOB)
+            status["already_running"] = True
+            return 200, status
+        if not files:
+            RESTORE_ALL_JOB = {
+                "running": False, "total": 0, "restored": 0, "failed": 0,
+                "current": "", "results": [],
+            }
+            return 200, dict(RESTORE_ALL_JOB)
+        RESTORE_ALL_JOB = {
+            "running": True,
+            "total": len(files),
+            "restored": 0,
+            "failed": 0,
+            "current": "",
+            "results": [],
+        }
+        status = dict(RESTORE_ALL_JOB)
+        RESTORE_ALL_THREAD = threading.Thread(
+            target=_restore_all_worker, args=(files,), daemon=True)
+        RESTORE_ALL_THREAD.start()
+    return 202, status
+
+
 class MaldetAPI:
     """Dispatches API requests to maldet CLI commands."""
 
@@ -1309,6 +1392,9 @@ class MaldetAPI:
 
         if route == "/api/quarantine/stats" and method == "GET":
             return MaldetAPI._quarantine_stats()
+
+        if route == "/api/quarantine/restore-all" and method == "GET":
+            return 200, restore_all_status()
 
         if route == "/api/quarantine/details" and method == "GET":
             filename = query.get("file", [""])[0]
@@ -1805,32 +1891,7 @@ class MaldetAPI:
     def _handle_quarantine_action(action, data):
         """Handle quarantine actions (restore, view info)."""
         if action == "restore-all":
-            files = parse_quarantine_list()
-            results = []
-            for item in files:
-                filename = item.get("name", "")
-                if not filename or os.path.basename(filename) != filename:
-                    results.append({"file": filename, "ok": False, "error": "Invalid quarantine filename"})
-                    continue
-                try:
-                    quarantine_details(filename)
-                except (FileNotFoundError, ValueError):
-                    results.append({"file": filename, "ok": False, "error": "Quarantined file not found"})
-                    continue
-                out, err, rc = run_maldet(["-s", filename], timeout=30)
-                results.append({
-                    "file": filename,
-                    "ok": rc in (0, 2),
-                    "returncode": rc,
-                    "stdout": out,
-                    "stderr": err,
-                })
-            failed = [item for item in results if not item["ok"]]
-            return (200 if not failed else 207), {
-                "restored": len(results) - len(failed),
-                "failed": len(failed),
-                "results": results,
-            }
+            return start_restore_all()
         if action == "restore":
             file_path = data.get("file", "")
             if not file_path or os.path.basename(file_path) != file_path:
