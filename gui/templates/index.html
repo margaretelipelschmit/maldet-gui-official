@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Maldet GUI - Linux Malware Detect Web Interface</title>
-    <link rel="stylesheet" href="/static/style.css?v=6">
+    <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
     <div id="app">
@@ -45,6 +45,15 @@
             <div class="top-bar">
                 <div class="top-bar-title"><button class="mobile-menu-btn btn btn-ghost btn-sm" id="mobile-menu-btn" aria-label="Open menu">☰</button><div class="page-title" id="page-title">Dashboard</div></div>
                 <div class="top-bar-actions">
+                    <button type="button" class="header-scan" id="header-scan" hidden aria-live="polite" aria-label="Active scan" data-action="open-scans">
+                        <span class="header-scan-dot" aria-hidden="true"></span>
+                        <span class="header-scan-copy">
+                            <span class="header-scan-line" id="header-scan-line"></span>
+                            <span class="header-scan-meta" id="header-scan-meta"></span>
+                            <span class="header-scan-track" id="header-scan-track" hidden><span class="header-scan-fill" id="header-scan-fill"></span></span>
+                        </span>
+                        <span class="header-scan-pct" id="header-scan-pct"></span>
+                    </button>
                     <label class="language-picker" for="language-select">Language
                         <select id="language-select" class="form-input form-input-sm">
                             <option value="en">English</option>
@@ -61,7 +70,7 @@
         </div>
     </div>
     <div id="toast-container"></div>
-    <script src="/static/app.js?v=67"></script>
+    <script src="/static/app.js?v=68"></script>
     <script>
     // Boot check: se o app.js não carregar/executar (cache antigo, bloqueio,
     // erro de rede), mostra o motivo na própria página em vez de "Loading...".
