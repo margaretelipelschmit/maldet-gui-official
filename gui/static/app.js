@@ -925,7 +925,10 @@
             'Deleting...': 'Excluindo...', 'Restoring all...': 'Restaurando tudo...',
             'Quarantining...': 'Colocando em quarentena...', 'Quarantine': 'Quarentenar',
             'Restore': 'Restaurar', 'Clean': 'Limpar', 'Delete': 'Excluir',
-            'Restore all': 'Restaurar tudo', 'Send Test Alert': 'Enviar alerta de teste',
+            'Restore all': 'Restaurar tudo',
+            'Restoring quarantined files in the background': 'Restaurando os arquivos da quarentena em segundo plano',
+            'Restore all already running': 'A restauração de todos já está em andamento',
+            'Send Test Alert': 'Enviar alerta de teste',
             'Sending...': 'Enviando...', 'Saving...': 'Salvando...',
             'Maintenance complete': 'Manutenção concluída', 'Purge complete': 'Limpeza concluída',
             'Clear all logs, quarantine, and temp data?':
@@ -1024,11 +1027,18 @@
 
     function scanProgressInfo(scan) {
         var progress = (scan && scan.progress) || {};
-        var scanned = Number(progress.position || scan.files_scanned || 0);
-        var total = Number(progress.total || scan.total_files || 0);
-        var elapsed = Number(scan.elapsed);
-        var started = total > 0 && ((Number.isFinite(elapsed) && elapsed === 0) || scanned > 0);
-        if (!started) return { started: false, percent: null, scanned: scanned, total: total };
+        var hasPosition = progress.position !== undefined && progress.position !== null && progress.position !== '';
+        var progressTotal = Number(progress.total);
+        var scanned = hasPosition ? Number(progress.position) : Number(scan.files_scanned || 0);
+        var listed = Number(scan.total_files || 0);
+        if (!Number.isFinite(scanned) || scanned < 0) scanned = 0;
+        if (!Number.isFinite(progressTotal) || progressTotal < 0) progressTotal = 0;
+        if (!Number.isFinite(listed) || listed < 0) listed = 0;
+        // A published progress total means the stage counter has started at 0.
+        // Do not treat the file-list size as files already verified.
+        var started = progressTotal > 0;
+        var total = started ? progressTotal : listed;
+        if (!started) return { started: false, percent: null, scanned: 0, total: total };
         return {
             started: true,
             percent: Math.min(100, Math.max(0, (scanned / total) * 100)),
@@ -1173,6 +1183,9 @@
             }
             if (this.currentPage === 'dashboard' && name !== 'dashboard') {
                 stopDashboardRefresh();
+            }
+            if (this.currentPage === 'quarantine' && name !== 'quarantine') {
+                stopRestoreAllRefresh();
             }
             stopPageAutoRefresh();
             _pageRenderSeq++;
@@ -1821,13 +1834,11 @@
             h += '<table><thead><tr><th>Scan ID</th><th>Directory</th><th>State</th><th>Engine</th><th>PID</th><th>Files scanned</th><th>Total files</th><th>Hits</th><th>Elapsed</th><th>Actions</th></tr></thead><tbody>';
             for (var i = 0; i < active.length; i++) {
                 var s = active[i];
-                var progress = s.progress || {};
-                var scanned = Number(progress.position || s.files_scanned || 0);
-                var total = Number(progress.total || s.total_files || 0);
-                var elapsed = Number(s.elapsed);
-                var scanClockStarted = Number.isFinite(elapsed) && elapsed === 0;
-                var progressStarted = total > 0 && (scanClockStarted || scanned > 0);
-                var percent = progressStarted ? Math.min(100, Math.max(0, (scanned / total) * 100)) : 0;
+                var info = scanProgressInfo(s);
+                var scanned = info.scanned;
+                var total = info.total;
+                var progressStarted = info.started;
+                var percent = progressStarted ? info.percent : 0;
                 var progressText = progressStarted && total > 0 ? Math.round(percent) + '%' : '';
                 var progressBar = progressStarted ? '<div class="scan-progress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.round(percent) + '">' +
                     '<div class="scan-progress-track"><div class="scan-progress-fill" style="width:' + percent.toFixed(1) + '%;"></div></div>' +
@@ -1958,12 +1969,60 @@
     }
 
     // ----- Quarantine -----
+    var _restoreAllTimer = null;
+    var _restoreAllNotified = false;
+
+    function stopRestoreAllRefresh() {
+        if (_restoreAllTimer) {
+            clearInterval(_restoreAllTimer);
+            _restoreAllTimer = null;
+        }
+    }
+
+    function refreshQuarantineView() {
+        if (Router.currentPage !== 'quarantine') return;
+        var content = document.getElementById('content');
+        if (!content) return;
+        renderQuarantine().then(function(html) {
+            if (Router.currentPage !== 'quarantine') return;
+            var scroll = content.scrollTop;
+            content.innerHTML = html;
+            translateDom(content);
+            content.scrollTop = scroll;
+        }).catch(function() {});
+    }
+
+    function startRestoreAllRefresh() {
+        if (_restoreAllTimer) return;
+        _restoreAllTimer = setInterval(function() {
+            API.get('/quarantine/restore-all').then(function(job) {
+                if (Router.currentPage === 'quarantine') refreshQuarantineView();
+                if (job && job.running) return;
+                stopRestoreAllRefresh();
+                if (_restoreAllNotified) return;
+                _restoreAllNotified = true;
+                if (job && job.failed) {
+                    toast('Restored ' + (job.restored || 0) + '; failed: ' + job.failed, 'error', 12000);
+                } else {
+                    toast('All quarantined files restored (' + ((job && job.restored) || 0) + ')', 'success');
+                }
+            }).catch(function() {});
+        }, 3000);
+    }
+
     function renderQuarantine() {
-        return API.get('/quarantine').then(function(data) {
+        return Promise.all([API.get('/quarantine'), API.get('/quarantine/restore-all')]).then(function(results) {
+            var data = results[0] || {};
+            var job = results[1] || {};
             var files = data.files || [];
+            if (job.running) startRestoreAllRefresh();
             var h = '<div class="card"><div class="card-header"><span class="card-title">Quarantined Files (' + files.length + ')</span>';
-            if (files.length) {
-                h += '<button class="btn btn-primary btn-sm" data-action="quarantine-restore-all">Restore all</button>';
+            if (files.length || job.running) {
+                var label = job.running
+                    ? ('Restoring ' + ((job.restored || 0) + (job.failed || 0)) + '/' + (job.total || 0) + '...')
+                    : 'Restore all';
+                h += '<button class="btn btn-primary btn-sm" data-action="quarantine-restore-all"' +
+                    (job.running ? ' disabled' : '') + '>' + label + '</button>';
             }
             h += '</div>';
             if (files.length === 0) {
@@ -2098,47 +2157,17 @@
 
     function restoreAllQuarantineFiles() {
         var buttons = document.querySelectorAll('[data-action="quarantine-restore-all"]');
-        if (!buttons.length || !confirm(tr('Restore all quarantined files?'))) return;
-        var filenames = Array.prototype.map.call(
-            document.querySelectorAll('[data-action="quarantine-restore"]'),
-            function(button) { return button.getAttribute('data-file'); }
-        ).filter(function(filename) { return !!filename; });
-        var restored = 0;
-        var failures = [];
+        if (!buttons.length || buttons[0].disabled || !confirm(tr('Restore all quarantined files?'))) return;
         buttons.forEach(function(button) {
             button.disabled = true;
-            button.textContent = 'Restoring 0/' + filenames.length + '...';
+            button.textContent = 'Restoring...';
         });
-
-        filenames.reduce(function(queue, filename, index) {
-            return queue.then(function() {
-                buttons.forEach(function(button) {
-                    button.textContent = 'Restoring ' + (index + 1) + '/' + filenames.length + '...';
-                });
-                return API.post('/quarantine/restore', { file: filename }, { timeout: 40000 })
-                    .then(function(data) {
-                        if (data.returncode !== undefined &&
-                                data.returncode !== 0 && data.returncode !== 2) {
-                            throw new Error(data.stderr || data.stdout || 'Restore failed');
-                        }
-                        restored++;
-                    })
-                    .catch(function(err) {
-                        failures.push({ file: filename, error: err.message });
-                    });
-            });
-        }, Promise.resolve()).then(function() {
-            if (failures.length) {
-                var failedNames = failures.slice(0, 5).map(function(item) {
-                    return item.file;
-                }).join(', ');
-                var suffix = failures.length > 5 ? ', ...' : '';
-                toast('Restored ' + restored + '; failed: ' + failures.length +
-                    ' (' + failedNames + suffix + ')', 'error', 12000);
-            } else {
-                toast('All quarantined files restored (' + restored + ')', 'success');
-            }
-            Router.navigate('quarantine');
+        _restoreAllNotified = false;
+        API.post('/quarantine/restore-all', {}, { timeout: 20000 }).then(function(job) {
+            toast(job.already_running ? 'Restore all already running' : 'Restoring quarantined files in the background', 'info');
+            if (job.running) startRestoreAllRefresh();
+            else Router.navigate('quarantine');
+            refreshQuarantineView();
         }).catch(function(err) {
             toast('Restore all failed: ' + err.message, 'error');
             buttons.forEach(function(button) {
