@@ -936,7 +936,13 @@
             'Password changed successfully.': 'Senha alterada com sucesso.',
             'Password (minimum 8 characters)': 'Senha (mínimo 8 caracteres)',
             'Error': 'Erro', 'Network error': 'Erro de rede',
-            'Request timed out': 'Tempo limite da requisição excedido'
+            'Request timed out': 'Tempo limite da requisição excedido',
+            'Active scan': 'Scan ativo',
+            'Active scans': 'Scans ativos',
+            'Waiting for progress': 'Aguardando progresso',
+            'hits': 'detecções',
+            'files': 'arquivos',
+            'Open scan management': 'Abrir gerenciamento de scans'
         }
     };
     function tr(text) {
@@ -1009,7 +1015,79 @@
     function initStatusIndicator() {
         if (_statusTimer) clearInterval(_statusTimer);
         updateStatusIndicator();
-        _statusTimer = setInterval(updateStatusIndicator, 5000);
+        updateHeaderScan();
+        _statusTimer = setInterval(function() {
+            updateStatusIndicator();
+            updateHeaderScan();
+        }, 5000);
+    }
+
+    function scanProgressInfo(scan) {
+        var progress = (scan && scan.progress) || {};
+        var scanned = Number(progress.position || scan.files_scanned || 0);
+        var total = Number(progress.total || scan.total_files || 0);
+        var elapsed = Number(scan.elapsed);
+        var started = total > 0 && ((Number.isFinite(elapsed) && elapsed === 0) || scanned > 0);
+        if (!started) return { started: false, percent: null, scanned: scanned, total: total };
+        return {
+            started: true,
+            percent: Math.min(100, Math.max(0, (scanned / total) * 100)),
+            scanned: scanned,
+            total: total
+        };
+    }
+
+    function updateHeaderScan() {
+        var box = document.getElementById('header-scan');
+        if (!box) return;
+        API.get('/scans/active').then(function(data) {
+            var active = (data.active_scans || []).filter(function(scan) { return scan && scan.scan_id; });
+            if (!active.length) {
+                box.hidden = true;
+                box.classList.remove('is-paused');
+                return;
+            }
+            var primary = active[0];
+            var best = scanProgressInfo(primary);
+            active.forEach(function(scan) {
+                var info = scanProgressInfo(scan);
+                if (info.started && (!best.started || info.percent > best.percent)) {
+                    primary = scan;
+                    best = info;
+                }
+            });
+            var path = primary.path || primary.scan_id;
+            var hits = Number(primary.hits || 0);
+            var line = active.length > 1
+                ? tr('Active scans') + ' (' + active.length + ')'
+                : tr('Active scan');
+            var meta = path + ' · ' + (primary.state || 'running');
+            if (best.started) meta += ' · ' + best.scanned + '/' + best.total + ' ' + tr('files');
+            if (hits > 0) meta += ' · ' + hits + ' ' + tr('hits');
+            if (primary.elapsed !== undefined && primary.elapsed !== null) meta += ' · ' + fmtDuration(primary.elapsed);
+            document.getElementById('header-scan-line').textContent = line;
+            document.getElementById('header-scan-meta').textContent = meta;
+            var pct = document.getElementById('header-scan-pct');
+            var track = document.getElementById('header-scan-track');
+            var fill = document.getElementById('header-scan-fill');
+            if (best.started) {
+                var rounded = Math.round(best.percent);
+                pct.textContent = rounded + '%';
+                track.hidden = false;
+                fill.style.width = best.percent.toFixed(1) + '%';
+                box.setAttribute('aria-label', line + ' ' + rounded + '% ' + path);
+            } else {
+                pct.textContent = '';
+                track.hidden = true;
+                fill.style.width = '0%';
+                box.setAttribute('aria-label', line + ' · ' + tr('Waiting for progress') + ' · ' + path);
+            }
+            box.classList.toggle('is-paused', String(primary.state) === 'paused');
+            box.title = tr('Open scan management');
+            box.hidden = false;
+        }).catch(function() {
+            box.hidden = true;
+        });
     }
 
     // ----- Page auto-refresh -----
@@ -1194,6 +1272,7 @@
                 if (!el) return;
                 var action = el.getAttribute('data-action');
                 if (action === 'start-scan') startScan();
+                else if (action === 'open-scans') Router.navigate('scan-management');
                 else if (action === 'folder-picker') openFolderPicker(el.getAttribute('data-target'), el.getAttribute('data-title'));
                 else if (action === 'scan-details') openScanDetails(el.getAttribute('data-id'));
                 else if (action === 'scan-details-close') closeScanDetails();
