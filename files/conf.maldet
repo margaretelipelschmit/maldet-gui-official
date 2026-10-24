@@ -10,8 +10,8 @@
 ##
 
 # Enable or disable e-mail alerts, this includes application version
-# alerts as well as automated/manual scan reports. On-demand reports
-# can still be sent using '--report SCANID user@domain.com'.
+# alerts, automated/manual scan reports, and every event_log line.
+# On-demand reports can still be sent using '--report SCANID user@domain.com'.
 # [0 = disabled, 1 = enabled]
 email_alert="0"
 
@@ -70,7 +70,8 @@ smtp_from=""
 smtp_user="maldetgui"
 smtp_pass=""
 
-# Enable or disable telegram alerts
+# Enable or disable telegram alerts, including every event_log line and
+# structured events.
 # [0 = disabled, 1 = enabled]
 telegram_alert="0"
 

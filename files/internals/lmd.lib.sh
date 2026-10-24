@@ -171,6 +171,10 @@ eout() {
 		echo "$(date +"%b %d %Y %H:%M:%S") $(hostname -s) maldet($$): $1" >> "$maldet_log"
 		if [ -n "$2" ]; then echo "maldet($$): $1"; fi
 	fi
+	# Every event_log line is also an alert when a channel is enabled.
+	if declare -F _lmd_alert_log_line >/dev/null 2>&1; then
+		_lmd_alert_log_line "$1"
+	fi
 }
 
 get_filestat() {
