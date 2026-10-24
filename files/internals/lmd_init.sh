@@ -396,28 +396,42 @@ _lmd_elog_init() {
 	fi
 }
 
-_lmd_elog_event() {
-	command -v elog_event >/dev/null 2>&1 && elog_event "$@"
-
-	# Mirror every structured event to Telegram when enabled. Keep this in the
-	# central event wrapper so scan, monitor, quarantine, update, and hook
-	# events use the same delivery path.
-	if [ "${telegram_alert:-0}" = "1" ] && [ "${_LMD_TELEGRAM_EVENT_SENDING:-0}" != "1" ] &&
+_lmd_alert_log_line() {
+	# Send one event_log line through every enabled alert channel.
+	local _line="$1"
+	[ -n "$_line" ] || return 0
+	[ "${_LMD_LOG_ALERT_SENDING:-0}" = "1" ] && return 0
+	[ "${email_alert:-0}" != "1" ] && [ "${telegram_alert:-0}" != "1" ] && return 0
+	_LMD_LOG_ALERT_SENDING=1
+	if [ "${telegram_alert:-0}" = "1" ] &&
 		[ -n "${ALERT_TELEGRAM_BOT_TOKEN:-${telegram_bot_token:-}}" ] &&
 		[ -n "${ALERT_TELEGRAM_CHAT_ID:-${telegram_channel_id:-}}" ] &&
 		declare -F _alert_telegram_message >/dev/null 2>&1; then
-		local _event_type="${1:-event}" _event_level="${2:-info}" _event_msg="${3:-}" _event_extras="${*:4}"
-		local _event_text="LMD event
-Type: $_event_type
-Level: $_event_level
-Message: $_event_msg"
-		[ -n "$_event_extras" ] && _event_text="${_event_text}
-Details: $_event_extras"
-		_LMD_TELEGRAM_EVENT_SENDING=1
-		_alert_telegram_message "$_event_text" \
+		_alert_telegram_message "LMD log
+$_line" \
 			"${ALERT_TELEGRAM_BOT_TOKEN:-$telegram_bot_token}" \
 			"${ALERT_TELEGRAM_CHAT_ID:-$telegram_channel_id}" >/dev/null 2>&1 || true
-		_LMD_TELEGRAM_EVENT_SENDING=0
+	fi
+	if [ "${email_alert:-0}" = "1" ] && [ -n "${email_addr:-}" ] &&
+		declare -F _alert_deliver_email >/dev/null 2>&1; then
+		local _tmp
+		_tmp=$(mktemp "${tmpdir:-${TMPDIR:-/tmp}}/lmd-log-alert.XXXXXX")
+		printf '%s\n' "$_line" > "$_tmp"
+		_alert_deliver_email "$email_addr" "${email_subj:-LMD log}" "$_tmp" "" "text" >/dev/null 2>&1 || true
+		command rm -f "$_tmp"
+	fi
+	_LMD_LOG_ALERT_SENDING=0
+}
+
+_lmd_elog_event() {
+	command -v elog_event >/dev/null 2>&1 && elog_event "$@"
+
+	# Structured events are not written to event_log, so send them as alerts too.
+	local _event_type="${1:-event}" _event_level="${2:-info}" _event_msg="${3:-}" _event_extras="${*:4}"
+	local _event_text="[$_event_type] $_event_level: $_event_msg"
+	[ -n "$_event_extras" ] && _event_text="${_event_text} ($_event_extras)"
+	if declare -F _lmd_alert_log_line >/dev/null 2>&1; then
+		_lmd_alert_log_line "$_event_text"
 	fi
 }
 
